@@ -73,9 +73,6 @@ extern void tcp_time_wait(struct sock *sk, int state, int timeo);
 /* After receiving this amount of duplicate ACKs fast retransmit starts. */
 #define TCP_FASTRETRANS_THRESH 3
 
-/* Maximal reordering. */
-#define TCP_MAX_REORDERING	127
-
 /* Maximal number of ACKs sent quickly to accelerate slow-start. */
 #define TCP_MAX_QUICKACKS	16U
 
@@ -292,6 +289,7 @@ extern int sysctl_tcp_abort_on_overflow;
 extern int sysctl_tcp_max_orphans;
 extern int sysctl_tcp_fack;
 extern int sysctl_tcp_reordering;
+extern int sysctl_tcp_max_reordering;
 extern int sysctl_tcp_dsack;
 extern int sysctl_tcp_wmem[3];
 extern int sysctl_tcp_rmem[3];
