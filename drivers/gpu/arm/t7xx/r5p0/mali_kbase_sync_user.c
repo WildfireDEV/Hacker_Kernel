@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2012-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -41,14 +41,14 @@ static int kbase_stream_close(struct inode *inode, struct file *file)
 
 	tl = (struct sync_timeline *)file->private_data;
 /* MALI_SEC_INTEGRATION */
-#if 1
+#ifdef MALI_SEC_INTEGRATION
+	BUG_ON(!tl);
+#else
 	if (file->private_data == NULL)
 		return 0;
 
 	if (atomic_read(&tl->kref.refcount) == 1)
 		file->private_data = NULL;
-#else
-	BUG_ON(!tl);
 #endif
 	sync_timeline_destroy(tl);
 	return 0;
@@ -59,7 +59,7 @@ static const struct file_operations stream_fops = {
 	.release = kbase_stream_close,
 };
 
-mali_error kbase_stream_create(const char *name, int *const out_fd)
+int kbase_stream_create(const char *name, int *const out_fd)
 {
 	struct sync_timeline *tl;
 
@@ -67,16 +67,16 @@ mali_error kbase_stream_create(const char *name, int *const out_fd)
 
 	tl = kbase_sync_timeline_alloc(name);
 	if (!tl)
-		return MALI_ERROR_FUNCTION_FAILED;
+		return -EINVAL;
 
 	*out_fd = anon_inode_getfd(name, &stream_fops, tl, O_RDONLY | O_CLOEXEC);
 
 	if (*out_fd < 0) {
 		sync_timeline_destroy(tl);
-		return MALI_ERROR_FUNCTION_FAILED;
-	} else {
-		return MALI_ERROR_NONE;
+		return -EINVAL;
 	}
+
+	return 0;
 }
 
 int kbase_stream_create_fence(int tl_fd)
@@ -151,17 +151,16 @@ int kbase_stream_create_fence(int tl_fd)
 	return fd;
 }
 
-mali_error kbase_fence_validate(int fd)
+int kbase_fence_validate(int fd)
 {
 	struct sync_fence *fence;
 
 	fence = sync_fence_fdget(fd);
-	if (NULL != fence) {
-		sync_fence_put(fence);
-		return MALI_ERROR_NONE;
-	} else {
-		return MALI_ERROR_FUNCTION_FAILED;
-	}
+	if (!fence)
+		return -EINVAL;
+
+	sync_fence_put(fence);
+	return 0;
 }
 
 #endif				/* CONFIG_SYNC */

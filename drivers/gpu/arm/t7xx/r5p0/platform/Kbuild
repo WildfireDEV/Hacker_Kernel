@@ -12,21 +12,10 @@
 #
 #
 
-MALI_CUSTOMER_RELEASE = 1
 
-platform_name := $(shell echo $(CONFIG_MALI_PLATFORM_THIRDPARTY_NAME))
 
-obj-y += mali_kbase_platform.o
-obj-y += gpu_notifier.o
-obj-y += gpu_exynos$(platform_name).o
-obj-y += gpu_control.o
-obj-y += gpu_pmqos.o
-obj-y += gpu_utilization.o
-obj-y += gpu_dvfs_handler.o
-obj-y += gpu_dvfs_api.o
-obj-y += gpu_dvfs_governor.o
-obj-y += gpu_perf.o
-obj-y += gpu_hwcnt.o
-obj-y += gpu_balance.o
-obj-$(CONFIG_MALI_DEBUG_SYS) += gpu_custom_interface.o
-obj-$(CONFIG_CPU_THERMAL_IPA) += gpu_ipa.o
+ifeq ($(CONFIG_MALI_PLATFORM_THIRDPARTY),y)
+# remove begin and end quotes from the Kconfig string type
+	# platform_name := $(shell echo $(CONFIG_MALI_PLATFORM_THIRDPARTY_NAME))
+	obj-y += exynos/
+endif

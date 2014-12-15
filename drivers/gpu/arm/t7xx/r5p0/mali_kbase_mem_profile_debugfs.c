@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2012-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -15,43 +15,9 @@
 
 
 
-#include <mali_kbase_gpu_memory_debugfs.h>
+#include <mali_kbase.h>
 
 #ifdef CONFIG_DEBUG_FS
-
-/* S.LSI INTERGRATION */
-extern struct kbase_device *pkbdev;
-
-/* mam_profile file name max length 22 based on format <int>_<int>\0 */
-#define KBASEP_DEBUGFS_FNAME_SIZE_MAX (10+1+10+1)
-
-void kbasep_mem_profile_debugfs_insert(struct kbase_context *kctx, char *data,
-		size_t size)
-{
-	spin_lock(&kctx->mem_profile_lock);
-	kfree(kctx->mem_profile_data);
-	kctx->mem_profile_data = data;
-	kctx->mem_profile_size = size;
-	spin_unlock(&kctx->mem_profile_lock);
-}
-
-/* S.LSI INTERGRATION */
-static mali_bool kbasep_mem_profile_check_kctx(struct kbase_context *kctx)
-{
-	struct kbasep_kctx_list_element *element, *tmp;
-	mali_bool found_element = MALI_FALSE;
-
-	mutex_lock(&pkbdev->kctx_list_lock);
-	list_for_each_entry_safe(element, tmp, &pkbdev->kctx_list, link) {
-		if (element->kctx == kctx) {
-			found_element = MALI_TRUE;
-			break;
-		}
-	}
-	mutex_unlock(&pkbdev->kctx_list_lock);
-
-	return found_element;
-}
 
 /** Show callback for the @c mem_profile debugfs file.
  *
@@ -61,30 +27,46 @@ static mali_bool kbasep_mem_profile_check_kctx(struct kbase_context *kctx)
  * @param sfile The debugfs entry
  * @param data Data associated with the entry
  *
- * @return 0 if successfully prints data in debugfs entry file
- *         -1 if it encountered an error
+ * @return 0 if it successfully prints data in debugfs entry file, non-zero otherwise
  */
 static int kbasep_mem_profile_seq_show(struct seq_file *sfile, void *data)
 {
 	struct kbase_context *kctx = sfile->private;
 
-	KBASE_DEBUG_ASSERT(kctx != NULL);
+	struct kbase_device *kbdev = gpu_get_device_structure();
+	/* MALI_SEC_INTEGRATION - Destroyed context */
+	mutex_lock(&kbdev->kctx_list_lock);
+	{
+		if (kctx == NULL) {
+			mutex_unlock(&kbdev->kctx_list_lock);
+			return 0;
+		}
+		else {
+			if(kbdev->vendor_callbacks->mem_profile_check_kctx) {
+				if (!kbdev->vendor_callbacks->mem_profile_check_kctx(kctx)) {
+					mutex_unlock(&kbdev->kctx_list_lock);
+					return 0;
+				}
+			}
 
-	/* MALI_SEC_INTEGRATION */
-	if (!kbasep_mem_profile_check_kctx(kctx))
-		return 0;
+			if(kctx->destroying_context == true) {
+				mutex_unlock(&kbdev->kctx_list_lock);
+				return 0;
+			}
+		}
+		atomic_inc(&kctx->mem_profile_showing_state);
+	}
+	mutex_unlock(&kbdev->kctx_list_lock);
 
-	/* MALI_SEC_INTEGRATION */
-	if (kctx->destroying_context)
-		return 0;
-
-	spin_lock(&kctx->mem_profile_lock);
+	mutex_lock(&kctx->mem_profile_lock);
 	/* MALI_SEC_INTEGRATION */
 	if (kctx->mem_profile_data) {
 		seq_write(sfile, kctx->mem_profile_data, kctx->mem_profile_size);
+
 		seq_putc(sfile, '\n');
 	}
-	spin_unlock(&kctx->mem_profile_lock);
+	mutex_unlock(&kctx->mem_profile_lock);
+	atomic_dec(&kctx->mem_profile_showing_state);
 
 	return 0;
 }
@@ -92,7 +74,7 @@ static int kbasep_mem_profile_seq_show(struct seq_file *sfile, void *data)
 /*
  *  File operations related to debugfs entry for mem_profile
  */
-STATIC int kbasep_mem_profile_debugfs_open(struct inode *in, struct file *file)
+static int kbasep_mem_profile_debugfs_open(struct inode *in, struct file *file)
 {
 	return single_open(file, kbasep_mem_profile_seq_show, in->i_private);
 }
@@ -104,72 +86,61 @@ static const struct file_operations kbasep_mem_profile_debugfs_fops = {
 	.release = single_release,
 };
 
-mali_error kbasep_mem_profile_debugfs_add(struct kbase_context *kctx)
+int kbasep_mem_profile_debugfs_insert(struct kbase_context *kctx, char *data,
+					size_t size)
 {
-	char name[KBASEP_DEBUGFS_FNAME_SIZE_MAX];
+	int err = 0;
 
-	KBASE_DEBUG_ASSERT(kctx != NULL);
+	mutex_lock(&kctx->mem_profile_lock);
 
-	spin_lock_init(&kctx->mem_profile_lock);
+	dev_dbg(kctx->kbdev->dev, "initialised: %d",
+		kbase_ctx_flag(kctx, KCTX_MEM_PROFILE_INITIALIZED));
 
-	/* MALI_SEC_INTEGRATION */
-	scnprintf(name, KBASEP_DEBUGFS_FNAME_SIZE_MAX, "%d_%d", kctx->tgid,
-			kctx->id);
+	if (!kbase_ctx_flag(kctx, KCTX_MEM_PROFILE_INITIALIZED)) {
+		if (!debugfs_create_file("mem_profile", S_IRUGO,
+					kctx->kctx_dentry, kctx,
+					&kbasep_mem_profile_debugfs_fops)) {
+			err = -EAGAIN;
+		} else {
+			kbase_ctx_flag_set(kctx,
+					   KCTX_MEM_PROFILE_INITIALIZED);
+		}
+	}
 
-	kctx->mem_dentry = debugfs_create_file(name, S_IRUGO,
-			kctx->kbdev->memory_profile_directory,
-			kctx, &kbasep_mem_profile_debugfs_fops);
-	if (IS_ERR(kctx->mem_dentry))
-		goto error_out;
+	if (kbase_ctx_flag(kctx, KCTX_MEM_PROFILE_INITIALIZED)) {
+		kfree(kctx->mem_profile_data);
+		kctx->mem_profile_data = data;
+		kctx->mem_profile_size = size;
+	}
 
-	return MALI_ERROR_NONE;
+	dev_dbg(kctx->kbdev->dev, "returning: %d, initialised: %d",
+		err, kbase_ctx_flag(kctx, KCTX_MEM_PROFILE_INITIALIZED));
 
-error_out:
-	return MALI_ERROR_FUNCTION_FAILED;
+	mutex_unlock(&kctx->mem_profile_lock);
+
+	return err;
 }
 
 void kbasep_mem_profile_debugfs_remove(struct kbase_context *kctx)
 {
-	KBASE_DEBUG_ASSERT(kctx != NULL);
+	mutex_lock(&kctx->mem_profile_lock);
 
-	/* MALI_SEC_INTEGRATION */
-	if (IS_ERR(kctx->mem_dentry))
-		goto out;
+	dev_dbg(kctx->kbdev->dev, "initialised: %d",
+				kbase_ctx_flag(kctx, KCTX_MEM_PROFILE_INITIALIZED));
 
-	debugfs_remove(kctx->mem_dentry);
-
-out:
-	spin_lock(&kctx->mem_profile_lock);
 	kfree(kctx->mem_profile_data);
 	kctx->mem_profile_data = NULL;
-	spin_unlock(&kctx->mem_profile_lock);
+	kctx->mem_profile_size = 0;
 
-	return;
+	mutex_unlock(&kctx->mem_profile_lock);
 }
 
 #else /* CONFIG_DEBUG_FS */
 
-/**
- * @brief Stub function for when debugfs is disabled
- */
-mali_error kbasep_mem_profile_debugfs_add(struct kbase_context *ctx)
-{
-	return MALI_ERROR_NONE;
-}
-
-/**
- * @brief Stub function for when debugfs is disabled
- */
-void kbasep_mem_profile_debugfs_remove(struct kbase_context *ctx)
-{
-}
-
-/**
- * @brief Stub function for when debugfs is disabled
- */
-void kbasep_mem_profile_debugfs_insert(struct kbase_context *kctx, char *data,
-		size_t size)
+int kbasep_mem_profile_debugfs_insert(struct kbase_context *kctx, char *data,
+					size_t size)
 {
 	kfree(data);
+	return 0;
 }
 #endif /* CONFIG_DEBUG_FS */
