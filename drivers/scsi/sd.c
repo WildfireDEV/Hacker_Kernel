@@ -3290,8 +3290,8 @@ static int sd_suspend(struct device *dev)
 	struct scsi_disk *sdkp = scsi_disk_get_from_dev(dev);
 	int ret = 0;
 
-	if (!sdkp)	/* E.g.: runtime suspend following sd_remove() */
-		return 0;
+	if (!sdkp)
+		return 0;	/* this can happen */
 
 	if (sdkp->WCE) {
 		sd_printk(KERN_NOTICE, sdkp, "Synchronizing SCSI cache\n");
