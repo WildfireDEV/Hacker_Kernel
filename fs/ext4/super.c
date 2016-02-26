@@ -373,8 +373,6 @@ static void ext4_journal_commit_callback(journal_t *journal, transaction_t *txn)
 	spin_unlock(&sbi->s_md_lock);
 }
 
-extern int ignore_fs_panic;
-
 /* Deal with the reporting of failure conditions on a filesystem such as
  * inconsistencies detected or read IO failures.
  *
@@ -394,7 +392,7 @@ static void ext4_handle_error(struct super_block *sb, char* buf)
 {
 	print_debug_bdinfo(sb);
 
-	if (sb->s_flags & MS_RDONLY || ignore_fs_panic)
+	if (sb->s_flags & MS_RDONLY)
 		return;
 
 	if (!test_opt(sb, ERRORS_CONT)) {
@@ -408,9 +406,13 @@ static void ext4_handle_error(struct super_block *sb, char* buf)
 		ext4_msg(sb, KERN_CRIT, "Remounting filesystem read-only");
 		sb->s_flags |= MS_RDONLY;
 	}
-	if (test_opt(sb, ERRORS_PANIC))
+	if (test_opt(sb, ERRORS_PANIC)) {
+		if (EXT4_SB(sb)->s_journal &&
+		  !(EXT4_SB(sb)->s_journal->j_flags & JBD2_REC_ERR))
+			return;
 		panic("EXT4-fs (device %s): panic! %s\n",
 			sb->s_id, buf?buf:"no message");
+	}
 }
 
 void __ext4_error(struct super_block *sb, const char *function,
@@ -621,8 +623,12 @@ void __ext4_abort(struct super_block *sb, const char *function,
 			jbd2_journal_abort(EXT4_SB(sb)->s_journal, -EIO);
 		save_error_info(sb, function, line);
 	}
-	if (test_opt(sb, ERRORS_PANIC) && !ignore_fs_panic)
+	if (test_opt(sb, ERRORS_PANIC)) {
+		if (EXT4_SB(sb)->s_journal &&
+		  !(EXT4_SB(sb)->s_journal->j_flags & JBD2_REC_ERR))
+			return;
 		panic("EXT4-fs panic from previous error\n");
+	}
 }
 
 void ext4_msg(struct super_block *sb, const char *prefix, const char *fmt, ...)
@@ -857,6 +863,7 @@ static void ext4_put_super(struct super_block *sb)
 		dump_orphan_list(sb, sbi);
 	J_ASSERT(list_empty(&sbi->s_orphan));
 
+	sync_blockdev(sb->s_bdev);
 	invalidate_bdev(sb->s_bdev);
 	if (sbi->journal_bdev && sbi->journal_bdev != sb->s_bdev) {
 		/*
@@ -3311,8 +3318,7 @@ static ext4_fsblk_t ext4_calculate_resv_clusters(struct super_block *sb)
 			EXT4_SB(sb)->s_cluster_bits;
 
 	do_div(resv_clusters, 50);
-	/* Do not reserve clusters */
-	resv_clusters = min_t(ext4_fsblk_t, resv_clusters, 0);
+	resv_clusters = min_t(ext4_fsblk_t, resv_clusters, 4096);
 
 	return resv_clusters;
 }
@@ -4286,9 +4292,6 @@ out_free_orig:
 static void ext4_init_journal_params(struct super_block *sb, journal_t *journal)
 {
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
-#ifdef CONFIG_JOURNAL_DATA_TAG
-	struct hd_struct *part;
-#endif
 
 	journal->j_commit_interval = sbi->s_commit_interval;
 	journal->j_min_batch_time = sbi->s_min_batch_time;
@@ -4303,23 +4306,6 @@ static void ext4_init_journal_params(struct super_block *sb, journal_t *journal)
 		journal->j_flags |= JBD2_ABORT_ON_SYNCDATA_ERR;
 	else
 		journal->j_flags &= ~JBD2_ABORT_ON_SYNCDATA_ERR;
-
-#ifdef CONFIG_JOURNAL_DATA_TAG
-	part = sb->s_bdev->bd_part;
-	if (part->info && !strncmp(part->info->volname, "USERDATA", 8)) {
-		journal->j_flags |= JBD2_JOURNAL_TAG;
-		printk("Setting journal tag on volname[%s]\n", 
-			part->info->volname);
-	} else if (!part->info && journal->j_maxlen >= 32768) {
-		/* maybe dm device &&  journal size > 128MB */
-		journal->j_flags |= JBD2_JOURNAL_TAG;
-		printk("Setting journal tag on volname[(null)] "
-		       "journal size %u MB\n", journal->j_maxlen * 4 / 1024);
-	}
-	else
-		journal->j_flags &= ~JBD2_JOURNAL_TAG;
-#endif
-
 	write_unlock(&journal->j_state_lock);
 }
 
