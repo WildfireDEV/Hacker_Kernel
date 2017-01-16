@@ -28,7 +28,6 @@
 
 #include <linux/mfd/arizona/core.h>
 #include <linux/mfd/arizona/registers.h>
-#include <linux/mfd/arizona/control.h>
 
 #include "arizona.h"
 #include "wm_adsp.h"
@@ -1129,10 +1128,6 @@ ARIZONA_MIXER_CONTROLS("SLIMTX8", ARIZONA_SLIMTX8MIX_INPUT_1_SOURCE),
 
 ARIZONA_GAINMUX_CONTROLS("SPDIFTX1", ARIZONA_SPDIFTX1MIX_INPUT_1_SOURCE),
 ARIZONA_GAINMUX_CONTROLS("SPDIFTX2", ARIZONA_SPDIFTX2MIX_INPUT_1_SOURCE),
-
-SOC_SINGLE_EXT("HPOUT1 EDRE Stereo Switch", CLEARWATER_EDRE_HP_STEREO_CONTROL,
-	       ARIZONA_HP1_EDRE_STEREO_SHIFT, 1, 0,
-	       clearwater_edre_stereo_get, clearwater_edre_stereo_put),
 };
 
 CLEARWATER_MIXER_ENUMS(EQ1, ARIZONA_EQ1MIX_INPUT_1_SOURCE);
@@ -2965,8 +2960,6 @@ static int clearwater_codec_probe(struct snd_soc_codec *codec)
 			ret);
 		return ret;
 	}
-	
-	arizona_control_init(codec);
 
 	return 0;
 }
