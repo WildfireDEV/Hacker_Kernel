@@ -757,7 +757,7 @@ struct s5p_mfc_raw_info {
 	int plane_size[3];
 };
 
-#define MFC_TIME_INDEX		8
+#define MFC_TIME_INDEX		15
 struct mfc_timestamp {
 	struct list_head list;
 	struct timeval timestamp;

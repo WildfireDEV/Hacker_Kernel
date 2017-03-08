@@ -326,6 +326,12 @@ int get_framerate_by_timestamp(struct s5p_mfc_ctx *ctx, struct v4l2_buffer *buf)
 				min_interval, max_framerate);
 	}
 
+	if (!ctx->ts_is_full) {
+		if (debug_ts == 1)
+			mfc_info_ctx("ts doesn't full, keep %d fps\n", ctx->framerate);
+		return ctx->framerate;
+	}
+
 	return max_framerate;
 }
 
@@ -1446,9 +1452,23 @@ static void s5p_mfc_handle_frame(struct s5p_mfc_ctx *ctx,
 	/* All frames remaining in the buffer have been extracted  */
 	if (dst_frame_status == S5P_FIMV_DEC_STATUS_DECODING_EMPTY) {
 		if (ctx->state == MFCINST_RES_CHANGE_FLUSH) {
+			struct mfc_timestamp *temp_ts = NULL;
+
 			mfc_debug(2, "Last frame received after resolution change.\n");
 			s5p_mfc_handle_frame_all_extracted(ctx);
 			ctx->state = MFCINST_RES_CHANGE_END;
+
+			/* empty the timestamp queue */
+			while (!list_empty(&ctx->ts_list)) {
+				temp_ts = list_entry((&ctx->ts_list)->next,
+						struct mfc_timestamp, list);
+				list_del(&temp_ts->list);
+			}
+			ctx->ts_count = 0;
+			ctx->ts_is_full = 0;
+			ctx->last_framerate = 0;
+			ctx->framerate = DEC_MAX_FPS;
+
 			goto leave_handle_frame;
 		} else {
 			s5p_mfc_handle_frame_all_extracted(ctx);
