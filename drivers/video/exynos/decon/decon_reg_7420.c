@@ -378,6 +378,21 @@ void decon_reg_config_mic(u32 id, int dsi_idx, struct decon_lcd *lcd_info)
 	decon_write_mask(id, ENHANCER_MIC_CTRL, ~0, ENHANCER_MIC_CTRL_MIC_ON_F);
 }
 
+#ifdef CONFIG_FB_DSU
+void decon_reg_configure_lcd_dsu(u32 id, enum decon_dsi_mode dsi_mode, struct decon_lcd *lcd_info)
+{
+	pr_info( "%s.\n", __func__ );
+
+	if (lcd_info->mic_enabled) {
+		if (id != 0) {
+			decon_err("\n   [ERROR!!!] decon.%d doesn't support MIC\n", id);
+			return;
+		}
+		decon_reg_config_mic(id, dsi_mode, lcd_info);
+	}
+}
+#endif
+
 void decon_reg_clear_int(u32 id)
 {
 	u32 mask;
