@@ -4442,7 +4442,10 @@ static ssize_t tracing_splice_read_pipe(struct file *filp,
 
 	spd.nr_pages = i;
 
-	ret = splice_to_pipe(pipe, &spd);
+	if (i)
+		ret = splice_to_pipe(pipe, &spd);
+	else
+		ret = 0;
 out:
 	splice_shrink_spd(&spd);
 	return ret;
@@ -4679,7 +4682,7 @@ tracing_mark_write(struct file *filp, const char __user *ubuf,
 	*fpos += written;
 
  out_unlock:
-	for (i = 0; i < nr_pages; i++){
+	for (i = nr_pages - 1; i >= 0; i--) {
 		kunmap_atomic(map_page[i]);
 		put_page(pages[i]);
 	}
