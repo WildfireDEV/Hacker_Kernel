@@ -130,16 +130,24 @@ EXPORT_SYMBOL_GPL(af_alg_release);
 void af_alg_release_parent(struct sock *sk)
 {
 	struct alg_sock *ask = alg_sk(sk);
+<<<<<<< HEAD
 	unsigned int nokey = ask->nokey_refcnt;
 	bool last = nokey && !ask->refcnt;
+=======
+	bool last;
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 
 	sk = ask->parent;
 	ask = alg_sk(sk);
 
 	lock_sock(sk);
+<<<<<<< HEAD
 	ask->nokey_refcnt -= nokey;
 	if (!last)
 		last = !--ask->refcnt;
+=======
+	last = !--ask->refcnt;
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 	release_sock(sk);
 
 	if (last)
@@ -182,7 +190,11 @@ static int alg_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 
 	err = -EBUSY;
 	lock_sock(sk);
+<<<<<<< HEAD
 	if (ask->refcnt | ask->nokey_refcnt)
+=======
+	if (ask->refcnt)
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 		goto unlock;
 
 	swap(ask->type, type);
@@ -281,19 +293,27 @@ int af_alg_accept(struct sock *sk, struct socket *newsock)
 	security_sk_clone(sk, sk2);
 
 	err = type->accept(ask->private, sk2);
+<<<<<<< HEAD
 
 	nokey = err == -ENOKEY;
 	if (nokey && type->accept_nokey)
 		err = type->accept_nokey(ask->private, sk2);
 
+=======
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 	if (err)
 		goto unlock;
 
 	sk2->sk_family = PF_ALG;
 
+<<<<<<< HEAD
 	if (nokey || !ask->refcnt++)
 		sock_hold(sk);
 	ask->nokey_refcnt += nokey;
+=======
+	if (!ask->refcnt++)
+		sock_hold(sk);
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 	alg_sk(sk2)->parent = sk;
 	alg_sk(sk2)->type = type;
 	alg_sk(sk2)->nokey_refcnt = nokey;

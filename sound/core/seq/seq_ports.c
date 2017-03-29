@@ -528,18 +528,28 @@ static int check_and_subscribe_port(struct snd_seq_client *client,
 	atomic_inc(&subs->ref_count);
 	write_unlock_irq(&grp->list_lock);
 	err = 0;
+<<<<<<< HEAD
 
  __error:
 	up_write(&grp->list_mutex);
 	return err;
 }
 
+=======
+
+ __error:
+	up_write(&grp->list_mutex);
+	return err;
+}
+
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 static void delete_and_unsubscribe_port(struct snd_seq_client *client,
 					struct snd_seq_client_port *port,
 					struct snd_seq_subscribers *subs,
 					bool is_src, bool ack)
 {
 	struct snd_seq_port_subs_info *grp;
+<<<<<<< HEAD
 	struct list_head *list;
 	bool empty;
 
@@ -550,12 +560,26 @@ static void delete_and_unsubscribe_port(struct snd_seq_client *client,
 	empty = list_empty(list);
 	if (!empty)
 		list_del_init(list);
+=======
+
+	grp = is_src ? &port->c_src : &port->c_dest;
+	down_write(&grp->list_mutex);
+	write_lock_irq(&grp->list_lock);
+	if (is_src)
+		list_del(&subs->src_list);
+	else
+		list_del(&subs->dest_list);
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 	grp->exclusive = 0;
 	write_unlock_irq(&grp->list_lock);
 	up_write(&grp->list_mutex);
 
+<<<<<<< HEAD
 	if (!empty)
 		unsubscribe_port(client, port, grp, &subs->info, ack);
+=======
+	unsubscribe_port(client, port, grp, &subs->info, ack);
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 }
 
 /* connect two ports */

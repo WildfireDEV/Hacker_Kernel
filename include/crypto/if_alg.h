@@ -31,7 +31,10 @@ struct alg_sock {
 	struct sock *parent;
 
 	unsigned int refcnt;
+<<<<<<< HEAD
 	unsigned int nokey_refcnt;
+=======
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 
 	const struct af_alg_type *type;
 	void *private;

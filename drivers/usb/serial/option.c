@@ -271,7 +271,10 @@ static void option_instat_callback(struct urb *urb);
 #define TELIT_PRODUCT_UE910_V2			0x1012
 #define TELIT_PRODUCT_LE922_USBCFG0		0x1042
 #define TELIT_PRODUCT_LE922_USBCFG3		0x1043
+<<<<<<< HEAD
 #define TELIT_PRODUCT_LE922_USBCFG5		0x1045
+=======
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 #define TELIT_PRODUCT_LE920			0x1200
 #define TELIT_PRODUCT_LE910			0x1201
 #define TELIT_PRODUCT_LE910_USBCFG4		0x1206
@@ -646,10 +649,13 @@ static const struct option_blacklist_info telit_le922_blacklist_usbcfg3 = {
 	.reserved = BIT(1) | BIT(2) | BIT(3),
 };
 
+<<<<<<< HEAD
 static const struct option_blacklist_info cinterion_rmnet2_blacklist = {
 	.reserved = BIT(4) | BIT(5),
 };
 
+=======
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 static const struct usb_device_id option_ids[] = {
 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_COLT) },
 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA) },
@@ -1203,8 +1209,11 @@ static const struct usb_device_id option_ids[] = {
 		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg0 },
 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE922_USBCFG3),
 		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg3 },
+<<<<<<< HEAD
 	{ USB_DEVICE_INTERFACE_CLASS(TELIT_VENDOR_ID, TELIT_PRODUCT_LE922_USBCFG5, 0xff),
 		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg0 },
+=======
+>>>>>>> 07333b1723b676a75081b2954d92dba360c6f0c6
 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE910),
 		.driver_info = (kernel_ulong_t)&telit_le910_blacklist },
 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE910_USBCFG4),
