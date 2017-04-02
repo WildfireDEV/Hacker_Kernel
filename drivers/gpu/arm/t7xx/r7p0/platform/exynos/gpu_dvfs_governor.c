@@ -89,7 +89,7 @@ static int gpu_dvfs_governor_default(struct exynos_context *platform, int utiliz
 	if ((platform->step > gpu_dvfs_get_level(platform->gpu_max_clock)) &&
 			(utilization > platform->table[platform->step].max_threshold)) {
 		platform->step--;
-#ifdef MALI_SEC_HWCNT
+#ifdef CONFIG_MALI_SEC_HWCNT
 		if ((!platform->hwcnt_bt_clk) && (platform->table[platform->step].clock > platform->gpu_max_clock_limit))
 			platform->step = gpu_dvfs_get_level(platform->gpu_max_clock_limit);
 #else
@@ -131,7 +131,7 @@ static int gpu_dvfs_governor_interactive(struct exynos_context *platform, int ut
 			platform->step--;
 			platform->interactive.delay_count = 0;
 		}
-#ifdef MALI_SEC_HWCNT
+#ifdef CONFIG_MALI_SEC_HWCNT
 		if ((!platform->hwcnt_bt_clk) && (platform->table[platform->step].clock > platform->gpu_max_clock_limit))
 			platform->step = gpu_dvfs_get_level(platform->gpu_max_clock_limit);
 #else
@@ -246,6 +246,11 @@ int gpu_dvfs_decide_next_freq(struct kbase_device *kbdev, int utilization)
 	gpu_dvfs_decide_next_governor(platform);
 	gpu_dvfs_get_next_level(platform, utilization);
 	spin_unlock_irqrestore(&platform->gpu_dvfs_spinlock, flags);
+
+#ifdef CONFIG_MALI_SEC_CL_BOOST
+	if (kbdev->pm.backend.metrics.is_full_compute_util)
+		platform->step = gpu_dvfs_get_level(platform->gpu_max_clock_limit);
+#endif
 
 #ifdef CONFIG_CPU_THERMAL_IPA
 	ipa_mali_dvfs_requested(platform->table[platform->step].clock);

@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2014 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2014-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -16,6 +16,8 @@
 
 
 #include <linux/seq_file.h>
+
+#include <mali_kbase.h>
 
 #include <mali_kbase_jd_debugfs.h>
 
@@ -41,6 +43,13 @@ static int kbasep_jd_debugfs_atoms_show(struct seq_file *sfile, void *data)
 
 	KBASE_DEBUG_ASSERT(kctx != NULL);
 
+	/* Print version */
+	seq_printf(sfile, "v%u\n", MALI_JD_DEBUGFS_VERSION);
+
+	/* Print U/K API version */
+	seq_printf(sfile, "ukv%u.%u\n", BASE_UK_VERSION_MAJOR,
+			BASE_UK_VERSION_MINOR);
+
 	/* Print table heading */
 	seq_puts(sfile, "atom id,core reqs,status,coreref status,predeps,start time,time on gpu\n");
 
@@ -48,7 +57,7 @@ static int kbasep_jd_debugfs_atoms_show(struct seq_file *sfile, void *data)
 	/* General atom states */
 	mutex_lock(&kctx->jctx.lock);
 	/* JS-related states */
-	spin_lock_irqsave(&kctx->kbdev->js_data.runpool_irq.lock, irq_flags);
+	spin_lock_irqsave(&kctx->kbdev->hwaccess_lock, irq_flags);
 	for (i = 0; i != BASE_JD_ATOM_COUNT; ++i) {
 		struct kbase_jd_atom *atom = &atoms[i];
 		s64 start_timestamp = 0;
@@ -75,7 +84,7 @@ static int kbasep_jd_debugfs_atoms_show(struct seq_file *sfile, void *data)
 					atom->time_spent_us * 1000 : start_timestamp)
 				);
 	}
-	spin_unlock_irqrestore(&kctx->kbdev->js_data.runpool_irq.lock, irq_flags);
+	spin_unlock_irqrestore(&kctx->kbdev->hwaccess_lock, irq_flags);
 	mutex_unlock(&kctx->jctx.lock);
 
 	return 0;
@@ -101,7 +110,7 @@ static const struct file_operations kbasep_jd_debugfs_atoms_fops = {
 	.release = single_release,
 };
 
-void kbasep_jd_debugfs_ctx_add(struct kbase_context *kctx)
+void kbasep_jd_debugfs_ctx_init(struct kbase_context *kctx)
 {
 	KBASE_DEBUG_ASSERT(kctx != NULL);
 

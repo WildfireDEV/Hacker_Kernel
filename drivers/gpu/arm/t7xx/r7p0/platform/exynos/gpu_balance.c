@@ -415,6 +415,7 @@ int exynos_gpu_init_hw(void *dev)
 
 	/* G3D_CFGREG0 register bit16 set to 1.
 	 * It is change the blkg3d clock path from aclk-g3d to aclk-g3d feed-back path */
+	GPU_LOG(DVFS_INFO, LSI_EXYNOS_GPU_INIT_HW, 0u, 0u, "LSI_EXYNOS_GPU_INIT_HW\n");
 	temp = __raw_readl(EXYNOS7420_VA_SYSREG + 0x1234);
 	temp |= (0x1 << 16);
 	__raw_writel(temp, EXYNOS7420_VA_SYSREG + 0x1234);

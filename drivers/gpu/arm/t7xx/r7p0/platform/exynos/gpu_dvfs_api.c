@@ -23,10 +23,6 @@
 #include "gpu_control.h"
 #include "gpu_dvfs_handler.h"
 #include "gpu_dvfs_governor.h"
-#ifdef CONFIG_MALI_DVFS_USER
-//#include "gpu_hwcnt.h"
-#include <mach/asv-exynos_cal.h>
-#endif
 
 #define GPU_SET_CLK_VOL(kbdev, prev_clk, clk, vol)			\
 ({			\
@@ -166,7 +162,7 @@ int gpu_set_target_clk_vol(int clk, bool pending_is_allowed)
 	mutex_unlock(&platform->gpu_clock_lock);
 
 	GPU_LOG(DVFS_INFO, DUMMY, 0u, 0u, "clk[%d -> %d], vol[%d (margin : %d)]\n",
-		prev_clk, gpu_get_cur_clock(platform), gpu_get_cur_voltage(platform), platform->voltage_margin);
+			prev_clk, gpu_get_cur_clock(platform), gpu_get_cur_voltage(platform), platform->voltage_margin);
 
 	return ret;
 }
@@ -207,7 +203,7 @@ int gpu_set_target_clk_vol_pending(int clk)
 		exynos7420_cl_dvfs_start(ID_G3D);
 #endif
 	GPU_LOG(DVFS_INFO, DUMMY, 0u, 0u, "pending clk[%d -> %d], vol[%d (margin : %d)]\n",
-		prev_clk, gpu_get_cur_clock(platform), gpu_get_cur_voltage(platform), platform->voltage_margin);
+			prev_clk, gpu_get_cur_clock(platform), gpu_get_cur_voltage(platform), platform->voltage_margin);
 
 	return ret;
 }
@@ -395,7 +391,7 @@ void gpu_dvfs_timer_control(bool enable)
 		GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u, "%s: DVFS is disabled\n", __func__);
 		return;
 	}
-#ifdef CONFIG_MALI_DVFS_USER
+#ifdef CONFIG_MALI_DVFS_USER_GOVERNOR
 	if (platform->udvfs_enable)
 		return;
 #endif
@@ -521,6 +517,24 @@ int gpu_dvfs_get_level(int clock)
 	return -1;
 }
 
+int gpu_dvfs_get_level_clock(int clock)
+{
+	struct kbase_device *kbdev = pkbdev;
+	struct exynos_context *platform = (struct exynos_context *) kbdev->platform_context;
+	int i, min, max;
+
+	DVFS_ASSERT(platform);
+
+	min = gpu_dvfs_get_level(platform->gpu_min_clock);
+	max = gpu_dvfs_get_level(platform->gpu_max_clock);
+
+	for (i = max; i <= min; i++)
+		if (clock - (int)(platform->table[i].clock) >= 0)
+			return platform->table[i].clock;
+
+	return -1;
+}
+
 int gpu_dvfs_get_voltage(int clock)
 {
 	struct kbase_device *kbdev = pkbdev;
@@ -580,6 +594,10 @@ static bool gpu_dvfs_check_valid_job(gpu_dvfs_job *job)
 	struct kbase_device *kbdev = pkbdev;
 	struct exynos_context *platform;
 	bool valid = true;
+#ifdef CONFIG_PWRCAL
+	struct dvfs_rate_volt rate_volt[48];
+	int table_size;
+#endif
 
 	platform = kbdev ? (struct exynos_context *) kbdev->platform_context:NULL;
 	if (platform == NULL)
@@ -617,32 +635,56 @@ static bool gpu_dvfs_check_valid_job(gpu_dvfs_job *job)
 			}
 			break;
 		case DVFS_REQ_GET_MIF_TABLE:
+#ifdef CONFIG_PWRCAL
 			if (job->data_size == JOB_GET_SIZE_VAL)
 				break;
-			if (job->data_size != sizeof(unsigned int) * (cal_get_min_lv(SYSC_DVFS_MIF) + 1)) {
+			table_size = cal_dfs_get_rate_asv_table(dvfs_mif, rate_volt);
+			if (job->data_size != sizeof(unsigned int) * table_size) {
+				GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u, "%s: failed to get MIF Table size\n", __func__);
 				valid = false;
 			}
+#else
+			valid = false;
+#endif
 			break;
 		case DVFS_REQ_GET_INT_TABLE:
+#ifdef CONFIG_PWRCAL
 			if (job->data_size == JOB_GET_SIZE_VAL)
 				break;
-			if (job->data_size != sizeof(unsigned int) * (cal_get_min_lv(SYSC_DVFS_INT) + 1)) {
+			table_size = cal_dfs_get_rate_asv_table(dvfs_int, rate_volt);
+			if (job->data_size != sizeof(unsigned int) * table_size) {
+				GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u, "%s: failed to get INT Table size\n", __func__);
 				valid = false;
 			}
+#else
+			valid = false;
+#endif
 			break;
 		case DVFS_REQ_GET_ATLAS_TABLE:
+#ifdef CONFIG_PWRCAL
 			if (job->data_size == JOB_GET_SIZE_VAL)
 				break;
-			if (job->data_size != sizeof(unsigned int) * (cal_get_min_lv(SYSC_DVFS_BIG) + 1)) {
+			table_size = cal_dfs_get_rate_asv_table(dvfs_big, rate_volt);
+			if (job->data_size != sizeof(unsigned int) * table_size) {
+				GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u, "%s: failed to get Big Table size\n", __func__);
 				valid = false;
 			}
+#else
+			valid = false;
+#endif
 			break;
 		case DVFS_REQ_GET_APOLLO_TABLE:
+#ifdef CONFIG_PWRCAL
 			if (job->data_size == JOB_GET_SIZE_VAL)
 				break;
-			if (job->data_size != sizeof(unsigned int) * (cal_get_min_lv(SYSC_DVFS_LIT) + 1)) {
+			table_size = cal_dfs_get_rate_asv_table(dvfs_little, rate_volt);
+			if (job->data_size != sizeof(unsigned int) * table_size) {
+				GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u, "%s: failed to get Little Table size\n", __func__);
 				valid = false;
 			}
+#else
+			valid = false;
+#endif
 			break;
 		case DVFS_REQ_SET_LEVEL:
 		case DVFS_REQ_GET_LEVEL:
@@ -670,7 +712,7 @@ static bool gpu_dvfs_check_valid_job(gpu_dvfs_job *job)
 	}
 	return valid;
 }
-
+#ifdef CONFIG_MALI_DVFS_USER_GOVERNOR
 static inline void gpu_dvfs_notify_info(base_jd_event_code event)
 {
 	struct kbase_device *kbdev = pkbdev;
@@ -719,6 +761,10 @@ void gpu_dvfs_check_destroy_context(struct kbase_context *kctx)
 	{
 		GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u,"gpu_dvfs_check_destroy_context %p\n", kctx);
 		platform->dvfs_kctx = NULL;
+		kfree(platform->mif_table);
+		kfree(platform->int_table);
+		kfree(platform->atlas_table);
+		kfree(platform->apollo_table);
 	}
 	mutex_unlock(&platform->gpu_process_job_lock);
 }
@@ -737,7 +783,7 @@ void gpu_dvfs_notify_poweron(void)
 	gpu_dvfs_notify_info(BASE_JD_EVENT_DVFS_INFO_POWER_ON);
 	return;
 }
-
+#endif
 static void __user *
 get_compat_pointer(struct kbase_context *kctx, const union kbase_pointer *p)
 {
@@ -797,11 +843,9 @@ bool gpu_dvfs_process_job(void *pkatom)
 		case DVFS_REQ_REGISTER_CTX:
 			if (platform->dvfs_kctx == NULL) {
 				platform->atom_idx = DVFS_USER_NOTIFIER_ATOM_NUMBER_BASE;
-				//kbase_pm_context_active(kbdev);
-				//exynos_hwcnt_init(kbdev);
-				//kbase_pm_context_idle(kbdev);
 			}
 			platform->dvfs_kctx = katom->kctx;
+			update_cal_table();
 			GPU_LOG(DVFS_INFO, DUMMY, 0u, 0u, "DVFS_REQ_REGISTER_CTX 0x%p\n", katom->kctx);
 			break;
 		case DVFS_REQ_GET_DVFS_TABLE:
@@ -825,75 +869,85 @@ bool gpu_dvfs_process_job(void *pkatom)
 				goto out;
 			break;
 		case DVFS_REQ_GET_UTILIZATION:
-			mutex_lock(&kbdev->pm.lock);
-			if (kbdev->pm.active_count > 0) {
-				gpu_dvfs_calculate_env_data(pkbdev);
-			}
+			gpu_dvfs_calculate_env_data(pkbdev);
 			mutex_unlock(&kbdev->pm.lock);
 			if (copy_to_user(data, &platform->env_data, job->data_size) != 0)
 				goto out;
-#ifdef TEMP_BLOCK
-			memset(kbdev->hwcnt.acc_buffer, 0, HWC_ACC_BUFFER_SIZE);
-#endif
 			break;
 		case DVFS_REQ_GET_MIF_TABLE:
+#ifdef CONFIG_PWRCAL
 			if (job->data_size == JOB_GET_SIZE_VAL) {
-				ret_val = sizeof(unsigned int) * (cal_get_min_lv(SYSC_DVFS_MIF) + 1);
+				ret_val = sizeof(unsigned int) * platform->mif_table_size;
 				if (copy_to_user(data, &ret_val, sizeof(int)) != 0)
 					goto out;
 				break;
 			}
-			for (i = 0; i <= cal_get_min_lv(SYSC_DVFS_MIF); i++) {
-				ret_val = cal_get_freq(SYSC_DVFS_MIF, i);
+			for (i = 0; i < platform->mif_table_size; i++) {
+				ret_val = platform->mif_table[i];
 				if (copy_to_user(&((unsigned int*)data)[i], &ret_val, sizeof(int)) != 0)
 					goto out;
 			}
+#else
+			goto out;
+#endif
 			break;
 		case DVFS_REQ_GET_INT_TABLE:
+#ifdef CONFIG_PWRCAL
 			if (job->data_size == JOB_GET_SIZE_VAL) {
-				ret_val = sizeof(unsigned int) * (cal_get_min_lv(SYSC_DVFS_INT) + 1);
+				ret_val = sizeof(unsigned int) * platform->int_table_size;
 				if (copy_to_user(data, &ret_val, sizeof(int)) != 0)
 					goto out;
 				break;
 			}
-			for (i = 0; i <= cal_get_min_lv(SYSC_DVFS_INT); i++) {
-				ret_val = cal_get_freq(SYSC_DVFS_INT, i);
+			for (i = 0; i < platform->int_table_size; i++) {
+				ret_val = platform->int_table[i];
 				if (copy_to_user(&((unsigned int*)data)[i], &ret_val, sizeof(int)) != 0)
 					goto out;
 			}
+#else
+			goto out;
+#endif
 			break;
 		case DVFS_REQ_GET_ATLAS_TABLE:
+#ifdef CONFIG_PWRCAL
 			if (job->data_size == JOB_GET_SIZE_VAL) {
-				ret_val = sizeof(unsigned int) * (cal_get_min_lv(SYSC_DVFS_BIG) + 1);
+				ret_val = sizeof(unsigned int) * platform->atlas_table_size;
 				if (copy_to_user(data, &ret_val, sizeof(int)) != 0)
 					goto out;
 				break;
 			}
-			for (i = 0; i <= cal_get_min_lv(SYSC_DVFS_BIG); i++) {
-				ret_val = cal_get_freq(SYSC_DVFS_BIG, i);
+			for (i = 0; i < platform->atlas_table_size; i++) {
+				ret_val = platform->atlas_table[i];
 				if (copy_to_user(&((unsigned int*)data)[i], &ret_val, sizeof(int)) != 0)
 					goto out;
 			}
+#else
+			goto out;
+#endif
 			break;
 		case DVFS_REQ_GET_APOLLO_TABLE:
+#ifdef CONFIG_PWRCAL
 			if (job->data_size == JOB_GET_SIZE_VAL) {
-				ret_val = sizeof(unsigned int) * (cal_get_min_lv(SYSC_DVFS_LIT) + 1);
+				ret_val = sizeof(unsigned int) * platform->apollo_table_size;
 				if (copy_to_user(data, &ret_val, sizeof(int)) != 0)
 					goto out;
 				break;
 			}
-			for (i = 0; i <= cal_get_min_lv(SYSC_DVFS_LIT); i++) {
-				ret_val = cal_get_freq(SYSC_DVFS_LIT, i);
+			for (i = 0; i < platform->apollo_table_size; i++) {
+				ret_val = platform->apollo_table[i];
 				if (copy_to_user(&((unsigned int*)data)[i], &ret_val, sizeof(int)) != 0)
 					goto out;
 			}
+#else
+			goto out;
+#endif
 			break;
 		case DVFS_REQ_SET_LEVEL:
 			if (copy_from_user(&level, data, sizeof(int)) != 0)
 				goto out;
 			clock = gpu_dvfs_get_clock(level);
 			gpu_set_target_clk_vol(clock, true);
-			cur_clock = gpu_get_cur_clock(platform);
+			cur_clock = platform->cur_clock;
 
 			/* set clock successfully */
 			if (clock != cur_clock) {
@@ -992,7 +1046,7 @@ bool gpu_dvfs_process_job(void *pkatom)
 			if (copy_from_user(&step, data, sizeof(int)) != 0)
 				goto out;
 			platform->atlas_min_step = step;
-			gpu_atlas_pmqos(platform, step == -1 ? 0:(cal_get_freq(SYSC_DVFS_BIG, step)*1000));
+			gpu_atlas_min_pmqos(platform, step == -1 ? 0 : platform->atlas_min_step);
 			break;
 		case DVFS_REQ_GET_APOLLO_MIN_LOCK:
 			ret_val = platform->apollo_min_step;
@@ -1003,7 +1057,7 @@ bool gpu_dvfs_process_job(void *pkatom)
 			if (copy_from_user(&step, data, sizeof(int)) != 0)
 				goto out;
 			platform->apollo_min_step = step;
-			gpu_apollo_pmqos(platform, step == -1 ? 0:(cal_get_freq(SYSC_DVFS_LIT, step)*1000));
+			gpu_apollo_min_pmqos(platform, step == -1 ? 0 : platform->apollo_min_step);
 			break;
 		case DVFS_REQ_GET_MIF_MIN_LOCK:
 			ret_val = platform->mif_min_step;
@@ -1014,7 +1068,7 @@ bool gpu_dvfs_process_job(void *pkatom)
 			if (copy_from_user(&step, data, sizeof(int)) != 0)
 				goto out;
 			platform->mif_min_step = step;
-			gpu_mif_pmqos(platform, step == -1 ? 0:(cal_get_freq(SYSC_DVFS_MIF, step)*1000));
+			gpu_mif_min_pmqos(platform, step == -1 ? 0 : platform->mif_min_step);
 			break;
 		case DVFS_REQ_GET_INT_MIN_LOCK:
 			ret_val = platform->int_min_step;
@@ -1025,7 +1079,7 @@ bool gpu_dvfs_process_job(void *pkatom)
 			if (copy_from_user(&step, data, sizeof(int)) != 0)
 				goto out;
 			platform->int_min_step = step;
-			gpu_int_pmqos(platform, step == -1 ? 0:(cal_get_freq(SYSC_DVFS_INT, step)*1000));
+			gpu_int_min_pmqos(platform, step == -1 ? 0 : platform->int_min_step);
 			break;
 		case DVFS_REQ_HWC_SETUP:
 		{
@@ -1033,42 +1087,29 @@ bool gpu_dvfs_process_job(void *pkatom)
 			if (copy_from_user(&hwc_setup, data, sizeof(gpu_dvfs_hwc_setup)) != 0)
 				goto out;
 			printk("DVFS_REQ_HWC_SETUP !!! %d\n", hwc_setup.jm_bm);
-
+#ifdef CONFIG_MALI_DVFS_USER_GOVERNOR
 			if (hwc_setup.profile_mode)
 				gpu_dvfs_notify_info(BASE_JD_EVENT_DVFS_INFO_PROFILE_MODE_ON);
 			else
 				gpu_dvfs_notify_info(BASE_JD_EVENT_DVFS_INFO_PROFILE_MODE_OFF);
-
+#endif
 			mutex_lock(&kbdev->pm.lock);
-#ifdef MALI_SEC_HWCNT
+#ifdef CONFIG_MALI_SEC_HWCNT
 			platform->hwcnt_choose_jm = kbdev->hwcnt.suspended_state.jm_bm = hwc_setup.jm_bm;
 			platform->hwcnt_choose_tiler = kbdev->hwcnt.suspended_state.tiler_bm = hwc_setup.tiler_bm;
 			platform->hwcnt_choose_shader = kbdev->hwcnt.suspended_state.shader_bm = hwc_setup.sc_bm;
 			platform->hwcnt_choose_mmu_l2 = kbdev->hwcnt.suspended_state.mmu_l2_bm = hwc_setup.memory_bm;
 #endif
-#ifdef TEMP_BLOCK
-			if (kbdev->pm.active_count > 0) {
-				hwcnt_stop(kbdev);
-				hwcnt_start(kbdev);
-			}
-#endif
 			mutex_unlock(&kbdev->pm.lock);
 		}
 			break;
 		case DVFS_REQ_HWC_DUMP:
-			mutex_lock(&kbdev->pm.lock);
-			if (kbdev->pm.active_count > 0) {
-				gpu_dvfs_calculate_env_data(pkbdev);
-			}
-			mutex_unlock(&kbdev->pm.lock);
-			platform->hwc_data.data[HWC_DATA_CLOCK] = gpu_get_cur_clock(platform);
+			gpu_dvfs_calculate_env_data(pkbdev);
+			platform->hwc_data.data[HWC_DATA_CLOCK] = platform->cur_clock;
 			platform->hwc_data.data[HWC_DATA_UTILIZATION] = platform->env_data.utilization;
 
 			if (copy_to_user(data, &platform->hwc_data, job->data_size) != 0)
 				goto out;
-#ifdef TEMP_BLOCK
-			memset(kbdev->hwcnt.acc_buffer, 0, HWC_ACC_BUFFER_SIZE);
-#endif
 			break;
 		default:
 			break;
@@ -1089,4 +1130,49 @@ out:
 
 	return false;
 }
+
+#ifdef CONFIG_PWRCAL
+bool update_cal_table()
+{
+	struct kbase_device *kbdev = pkbdev;
+	struct exynos_context *platform;
+	struct dvfs_rate_volt rate_volt[48];
+	int table_size, i;
+
+	platform = kbdev ? (struct exynos_context *) kbdev->platform_context:NULL;
+	if (platform == NULL)
+		return false;
+
+	/* update mif table */
+	table_size = cal_dfs_get_rate_asv_table(dvfs_mif, rate_volt);
+	platform->mif_table = kmalloc(sizeof(int) * table_size, GFP_KERNEL);
+	for (i = 0; i < table_size; i++) {
+		platform->mif_table[i] = rate_volt[i].rate;
+	}
+	platform->mif_table_size = table_size;
+	/* update little table */
+	table_size = cal_dfs_get_rate_asv_table(dvfs_little, rate_volt);
+	platform->apollo_table = kmalloc(sizeof(int) * table_size, GFP_KERNEL);
+	for (i = 0; i < table_size; i++) {
+		platform->apollo_table[i] = rate_volt[i].rate;
+	}
+	platform->apollo_table_size = table_size;
+	/* update big table */
+	table_size = cal_dfs_get_rate_asv_table(dvfs_big, rate_volt);
+	platform->atlas_table = kmalloc(sizeof(int) * table_size, GFP_KERNEL);
+	for (i = 0; i < table_size; i++) {
+		platform->atlas_table[i] = rate_volt[i].rate;
+	}
+	platform->atlas_table_size = table_size;
+	/* update int table */
+	table_size = cal_dfs_get_rate_asv_table(dvfs_int, rate_volt);
+	platform->int_table = kmalloc(sizeof(int) * table_size, GFP_KERNEL);
+	for (i = 0; i < table_size; i++) {
+		platform->int_table[i] = rate_volt[i].rate;
+	}
+	platform->int_table_size = table_size;
+
+	return true;
+}
+#endif
 #endif

@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2015-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -28,13 +28,15 @@ struct kbase_vinstr_client;
 
 /*****************************************************************************/
 
-/* MALI_SEC_INTEGRATION - moved from mali_kbase_vinstr.c */
+#ifdef CONFIG_MALI_SEC_HWCNT
+/* moved from mali_kbase_vinstr.c if SEC_HWCNT enabled */
 enum {
 	SHADER_HWCNT_BM,
 	TILER_HWCNT_BM,
 	MMU_L2_HWCNT_BM,
 	JM_HWCNT_BM
 };
+#endif
 
 /**
  * kbase_vinstr_init() - initialize the vinstr core
@@ -75,6 +77,22 @@ int kbase_vinstr_legacy_hwc_setup(
 		struct kbase_uk_hwcnt_setup *setup);
 
 /**
+ * kbase_vinstr_hwcnt_kernel_setup - configure hw counters for kernel side
+ *                                   client
+ * @vinstr_ctx:    vinstr context
+ * @setup:         reader's configuration
+ * @kernel_buffer: pointer to dump buffer
+ *
+ * setup->buffer_count and setup->fd are not used for kernel side clients.
+ *
+ * Return: pointer to client structure, or NULL on failure
+ */
+struct kbase_vinstr_client *kbase_vinstr_hwcnt_kernel_setup(
+		struct kbase_vinstr_context *vinstr_ctx,
+		struct kbase_uk_hwcnt_reader_setup *setup,
+		void *kernel_buffer);
+
+/**
  * kbase_vinstr_hwc_dump - issue counter dump for vinstr client
  * @cli:      pointer to vinstr client
  * @event_id: id of event that triggered hwcnt dump
@@ -95,24 +113,59 @@ int kbase_vinstr_hwc_dump(
 int kbase_vinstr_hwc_clear(struct kbase_vinstr_client *cli);
 
 /**
- * kbase_vinstr_hwc_suspend - suspends hardware counter collection for
- *                            a given kbase context
+ * kbase_vinstr_try_suspend - try suspending operation of a given vinstr context
  * @vinstr_ctx: vinstr context
+ *
+ * Return: 0 on success, or negative if state change is in progress
+ *
+ * Warning: This API call is non-generic. It is meant to be used only by
+ *          job scheduler state machine.
+ *
+ * Function initiates vinstr switch to suspended state. Once it was called
+ * vinstr enters suspending state. If function return non-zero value, it
+ * indicates that state switch is not complete and function must be called
+ * again. On state switch vinstr will trigger job scheduler state machine
+ * cycle.
  */
-void kbase_vinstr_hwc_suspend(struct kbase_vinstr_context *vinstr_ctx);
+int kbase_vinstr_try_suspend(struct kbase_vinstr_context *vinstr_ctx);
 
 /**
- * kbase_vinstr_hwc_resume - resumes hardware counter collection for
- *                            a given kbase context
+ * kbase_vinstr_suspend - suspends operation of a given vinstr context
  * @vinstr_ctx: vinstr context
+ *
+ * Function initiates vinstr switch to suspended state. Then it blocks until
+ * operation is completed.
  */
-void kbase_vinstr_hwc_resume(struct kbase_vinstr_context *vinstr_ctx);
+void kbase_vinstr_suspend(struct kbase_vinstr_context *vinstr_ctx);
 
-#ifdef MALI_SEC_HWCNT
+/**
+ * kbase_vinstr_resume - resumes operation of a given vinstr context
+ * @vinstr_ctx: vinstr context
+ *
+ * Function can be called only if it was preceded by a successful call
+ * to kbase_vinstr_suspend.
+ */
+void kbase_vinstr_resume(struct kbase_vinstr_context *vinstr_ctx);
+
+/**
+ * kbase_vinstr_dump_size - Return required size of dump buffer
+ * @kbdev: device pointer
+ *
+ * Return : buffer size in bytes
+ */
+size_t kbase_vinstr_dump_size(struct kbase_device *kbdev);
+
+/**
+ * kbase_vinstr_detach_client - Detach a client from the vinstr core
+ * @cli: pointer to vinstr client
+ */
+void kbase_vinstr_detach_client(struct kbase_vinstr_client *cli);
+
+#ifdef CONFIG_MALI_SEC_HWCNT
 struct kbase_vinstr_client *kbasep_vinstr_attach_client_sec(
 		struct kbase_vinstr_context *vinstr_ctx, u32 buffer_count,
-		u32 bitmap[4], void *argp);
-void kbasep_vinstr_detach_client_sec(struct kbase_vinstr_client *cli);
+		u32 bitmap[4], void *argp, void *kernel_buffer);
+void kbase_vinstr_detach_client_sec(struct kbase_vinstr_client *cli);
 int kbase_vinstr_enable(struct kbase_vinstr_context *ctx);
 void kbase_vinstr_disable(struct kbase_vinstr_context *ctx);
 void *kbase_vinstr_get_addr(struct kbase_device *kbdev);

@@ -22,7 +22,7 @@
 #include "mali_malisw.h"
 #include "mali_base_kernel.h"
 
-#ifdef MALI_SEC_HWCNT
+#ifdef CONFIG_MALI_SEC_HWCNT
 struct kbase_uk_hwcnt_gpr_dump {
 	union uk_header header;
 	u32 shader_20;

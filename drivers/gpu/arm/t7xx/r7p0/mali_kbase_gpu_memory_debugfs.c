@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2012-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2012-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -15,7 +15,7 @@
 
 
 
-#include <mali_kbase_gpu_memory_debugfs.h>
+#include <mali_kbase.h>
 
 #ifdef CONFIG_DEBUG_FS
 /** Show callback for the @c gpu_memory debugfs file.
@@ -33,7 +33,6 @@ extern int gpu_memory_seq_show(struct seq_file *sfile, void *data);
 #ifdef MALI_SEC_INTEGRATION
 static int kbasep_gpu_memory_seq_show(struct seq_file *sfile, void *data)
 {
-	ssize_t ret = 0;
 	struct list_head *entry;
 	const struct list_head *kbdev_list;
 
@@ -44,14 +43,14 @@ static int kbasep_gpu_memory_seq_show(struct seq_file *sfile, void *data)
 
 		kbdev = list_entry(entry, struct kbase_device, entry);
 		/* output the total memory usage and cap for this device */
-		ret = seq_printf(sfile, "%-16s  %10u\n",
+		seq_printf(sfile, "%-16s  %10u\n",
 				kbdev->devname,
 				atomic_read(&(kbdev->memdev.used_pages)));
 		mutex_lock(&kbdev->kctx_list_lock);
 		list_for_each_entry(element, &kbdev->kctx_list, link) {
 			/* output the memory usage and cap for each kctx
 			* opened on this device */
-			ret = seq_printf(sfile, "  %s-0x%p %10u\n",
+			seq_printf(sfile, "  %s-0x%p %10u\n",
 				"kctx",
 				element->kctx,
 				atomic_read(&(element->kctx->used_pages)));
@@ -59,14 +58,15 @@ static int kbasep_gpu_memory_seq_show(struct seq_file *sfile, void *data)
 		mutex_unlock(&kbdev->kctx_list_lock);
 	}
 	kbase_dev_list_put(kbdev_list);
-	return ret;
+	return 0;
 }
-#endif
+
 /*
  *  File operations related to debugfs entry for gpu_memory
  */
 static int kbasep_gpu_memory_debugfs_open(struct inode *in, struct file *file)
 {
+	/* MALI_SEC_INTEGRATION */
 	return single_open(file, gpu_memory_seq_show , NULL);
 }
 
@@ -96,4 +96,5 @@ void kbasep_gpu_memory_debugfs_init(struct kbase_device *kbdev)
 {
 	return;
 }
+#endif
 #endif

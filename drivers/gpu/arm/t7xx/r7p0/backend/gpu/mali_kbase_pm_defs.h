@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2014-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2014-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -55,11 +55,13 @@ struct kbase_jd_atom;
  * @KBASE_PM_CORE_L2: The L2 cache
  * @KBASE_PM_CORE_SHADER: Shader cores
  * @KBASE_PM_CORE_TILER: Tiler cores
+ * @KBASE_PM_CORE_STACK: Core stacks
  */
 enum kbase_pm_core_type {
 	KBASE_PM_CORE_L2 = L2_PRESENT_LO,
 	KBASE_PM_CORE_SHADER = SHADER_PRESENT_LO,
-	KBASE_PM_CORE_TILER = TILER_PRESENT_LO
+	KBASE_PM_CORE_TILER = TILER_PRESENT_LO,
+	KBASE_PM_CORE_STACK = STACK_PRESENT_LO
 };
 
 /**
@@ -118,8 +120,9 @@ struct kbasep_pm_metrics_data {
 
 	void *platform_data;
 	struct kbase_device *kbdev;
-#ifdef MALI_SEC_CL_BOOST
+#ifdef CONFIG_MALI_SEC_CL_BOOST
 	atomic_t time_compute_jobs, time_vertex_jobs, time_fragment_jobs;
+	bool is_full_compute_util;	/* Only compute utilisation is 100% */
 #endif
 };
 
@@ -180,6 +183,8 @@ union kbase_pm_ca_policy_data {
  *                           currently in a power-on transition
  * @powering_on_l2_state: A bit mask indicating which l2-caches are currently
  *                        in a power-on transition
+ * @powering_on_stack_state: A bit mask indicating which core stacks are
+ *                           currently in a power-on transition
  * @gpu_in_desired_state: This flag is set if the GPU is powered as requested
  *                        by the desired_xxx_state variables
  * @gpu_in_desired_state_wait: Wait queue set when @gpu_in_desired_state != 0
@@ -198,14 +203,32 @@ union kbase_pm_ca_policy_data {
  * @gpu_poweroff_pending: number of poweroff timer ticks until the GPU is
  *                        powered off
  * @shader_poweroff_pending_time: number of poweroff timer ticks until shaders
- *                        are powered off
+ *                        and/or timers are powered off
  * @gpu_poweroff_timer: Timer for powering off GPU
  * @gpu_poweroff_wq:   Workqueue to power off GPU on when timer fires
  * @gpu_poweroff_work: Workitem used on @gpu_poweroff_wq
  * @shader_poweroff_pending: Bit mask of shaders to be powered off on next
  *                           timer callback
- * @poweroff_timer_needed: true if the poweroff timer is currently running,
+ * @tiler_poweroff_pending: Bit mask of tilers to be powered off on next timer
+ *                          callback
+ * @poweroff_timer_needed: true if the poweroff timer is currently required,
  *                         false otherwise
+ * @poweroff_timer_running: true if the poweroff timer is currently running,
+ *                          false otherwise
+ *                          power_change_lock should be held when accessing,
+ *                          unless there is no way the timer can be running (eg
+ *                          hrtimer_cancel() was called immediately before)
+ * @poweroff_wait_in_progress: true if a wait for GPU power off is in progress.
+ *                             hwaccess_lock must be held when accessing
+ * @poweron_required: true if a GPU power on is required. Should only be set
+ *                    when poweroff_wait_in_progress is true, and therefore the
+ *                    GPU can not immediately be powered on. pm.lock must be
+ *                    held when accessing
+ * @poweroff_is_suspend: true if the GPU is being powered off due to a suspend
+ *                       request. pm.lock must be held when accessing
+ * @gpu_poweroff_wait_wq: workqueue for waiting for GPU to power off
+ * @gpu_poweroff_wait_work: work item for use with @gpu_poweroff_wait_wq
+ * @poweroff_wait: waitqueue for waiting for @gpu_poweroff_wait_work to complete
  * @callback_power_on: Callback when the GPU needs to be turned on. See
  *                     &struct kbase_pm_callback_conf
  * @callback_power_off: Callback when the GPU may be turned off. See
@@ -218,9 +241,8 @@ union kbase_pm_ca_policy_data {
  *                             &struct kbase_pm_callback_conf
  * @callback_power_runtime_off: Callback when the GPU may be turned off. See
  *                              &struct kbase_pm_callback_conf
- * @callback_cci_snoop_ctrl: Callback when the GPU L2 power may transition.
- *                           If enable is set then snoops should be enabled
- *                           otherwise snoops should be disabled
+ * @callback_power_runtime_idle: Optional callback when the GPU may be idle. See
+ *                              &struct kbase_pm_callback_conf
  *
  * Note:
  * During an IRQ, @ca_current_policy or @pm_current_policy can be NULL when the
@@ -249,6 +271,9 @@ struct kbase_pm_backend_data {
 	u64 desired_tiler_state;
 	u64 powering_on_tiler_state;
 	u64 powering_on_l2_state;
+#ifdef CONFIG_MALI_CORESTACK
+	u64 powering_on_stack_state;
+#endif /* CONFIG_MALI_CORESTACK */
 
 	bool gpu_in_desired_state;
 	wait_queue_head_t gpu_in_desired_state_wait;
@@ -276,8 +301,19 @@ struct kbase_pm_backend_data {
 	struct work_struct gpu_poweroff_work;
 
 	u64 shader_poweroff_pending;
+	u64 tiler_poweroff_pending;
 
 	bool poweroff_timer_needed;
+	bool poweroff_timer_running;
+
+	bool poweroff_wait_in_progress;
+	bool poweron_required;
+	bool poweroff_is_suspend;
+
+	struct workqueue_struct *gpu_poweroff_wait_wq;
+	struct work_struct gpu_poweroff_wait_work;
+
+	wait_queue_head_t poweroff_wait;
 
 	int (*callback_power_on)(struct kbase_device *kbdev);
 	void (*callback_power_off)(struct kbase_device *kbdev);
@@ -285,6 +321,7 @@ struct kbase_pm_backend_data {
 	void (*callback_power_resume)(struct kbase_device *kbdev);
 	int (*callback_power_runtime_on)(struct kbase_device *kbdev);
 	void (*callback_power_runtime_off)(struct kbase_device *kbdev);
+	int (*callback_power_runtime_idle)(struct kbase_device *kbdev);
 	/* MALI_SEC_INTEGRATION */
 	int (*callback_power_dvfs_on)(struct kbase_device *kbdev);
 	int (*callback_power_change_dvfs_level)(struct kbase_device *kbdev);
@@ -390,6 +427,11 @@ enum kbase_pm_ca_policy_id {
 typedef u32 kbase_pm_ca_policy_flags;
 
 /**
+ * Maximum length of a CA policy names
+ */
+#define KBASE_PM_CA_MAX_POLICY_NAME_LEN 15
+
+/**
  * struct kbase_pm_ca_policy - Core availability policy structure.
  *
  * Each core availability policy exposes a (static) instance of this structure
@@ -408,7 +450,7 @@ typedef u32 kbase_pm_ca_policy_flags;
  *                      It is used purely for debugging.
  */
 struct kbase_pm_ca_policy {
-	char *name;
+	char name[KBASE_PM_CA_MAX_POLICY_NAME_LEN + 1];
 
 	/**
 	 * Function called when the policy is selected

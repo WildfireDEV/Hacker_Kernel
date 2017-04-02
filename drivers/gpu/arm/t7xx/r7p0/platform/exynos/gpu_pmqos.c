@@ -118,6 +118,7 @@ int gpu_mif_pmqos(struct exynos_context *platform, int mem_freq)
 
 	return 0;
 }
+
 #ifdef CONFIG_MALI_DVFS_USER
 int proactive_pm_qos_command(struct exynos_context *platform, gpu_pmqos_state state)
 {
@@ -133,6 +134,10 @@ int proactive_pm_qos_command(struct exynos_context *platform, gpu_pmqos_state st
 			pm_qos_add_request(&proactive_atlas_min_qos, PM_QOS_CLUSTER1_FREQ_MIN, 0);
 			if (!platform->pmqos_int_disable)
 				pm_qos_add_request(&proactive_int_min_qos, PM_QOS_DEVICE_THROUGHPUT, 0);
+
+#ifdef CONFIG_PWRCAL
+			update_cal_table();
+#endif
 			break;
 		case GPU_CONTROL_PM_QOS_DEINIT:
 			pm_qos_remove_request(&proactive_mif_min_qos);
@@ -152,40 +157,50 @@ int proactive_pm_qos_command(struct exynos_context *platform, gpu_pmqos_state st
 	return 0;
 }
 
-int gpu_int_pmqos(struct exynos_context *platform, int int_freq)
+int gpu_mif_min_pmqos(struct exynos_context *platform, int mif_step)
 {
 	DVFS_ASSERT(platform);
 
 	if(!platform->devfreq_status)
 		return 0;
 
-	pm_qos_update_request(&proactive_int_min_qos, int_freq);
+	pm_qos_update_request_timeout(&proactive_mif_min_qos, platform->mif_table[mif_step], 30000);
 
 	return 0;
 }
 
-int gpu_apollo_pmqos(struct exynos_context *platform, int apollo_freq)
+int gpu_int_min_pmqos(struct exynos_context *platform, int int_step)
 {
 	DVFS_ASSERT(platform);
 
 	if(!platform->devfreq_status)
 		return 0;
 
-	//pm_qos_update_request(&proactive_apollo_min_qos, apollo_freq);
-	pm_qos_update_request_timeout(&proactive_apollo_min_qos, apollo_freq, 30000);
+	pm_qos_update_request_timeout(&proactive_int_min_qos, platform->int_table[int_step], 30000);
 
 	return 0;
 }
 
-int gpu_atlas_pmqos(struct exynos_context *platform, int atlas_freq)
+int gpu_apollo_min_pmqos(struct exynos_context *platform, int apollo_step)
 {
 	DVFS_ASSERT(platform);
 
 	if(!platform->devfreq_status)
 		return 0;
 
-	//pm_qos_update_request(&proactive_atlas_min_qos, atlas_freq);
-	pm_qos_update_request_timeout(&proactive_atlas_min_qos, atlas_freq, 30000);
+	pm_qos_update_request_timeout(&proactive_apollo_min_qos, platform->apollo_table[apollo_step], 30000);
+
+	return 0;
+}
+
+int gpu_atlas_min_pmqos(struct exynos_context *platform, int atlas_step)
+{
+	DVFS_ASSERT(platform);
+
+	if(!platform->devfreq_status)
+		return 0;
+
+	pm_qos_update_request_timeout(&proactive_atlas_min_qos, platform->atlas_table[atlas_step], 30000);
 
 	return 0;
 }

@@ -139,7 +139,7 @@ typedef enum {
 	GPU_EARLY_CLK_GATING,
 	GPU_DVS,
 	GPU_PERF_GATHERING,
-#ifdef MALI_SEC_HWCNT
+#ifdef CONFIG_MALI_SEC_HWCNT
 	GPU_HWCNT_GATHERING,
 	GPU_HWCNT_GPR,
 	GPU_HWCNT_PROFILE,
@@ -161,11 +161,12 @@ typedef enum {
 	GPU_CL_DVFS_START_BASE,
 	GPU_DEBUG_LEVEL,
 	GPU_TRACE_LEVEL,
-	GPU_CONFIG_LIST_END,
 #ifdef CONFIG_MALI_DVFS_USER
 	GPU_UDVFS_ENABLE,
 	GPU_UHWCNT_ENABLE,
 #endif
+	GPU_MO_MIN_CLOCK,
+	GPU_CONFIG_LIST_END,
 } gpu_config_list;
 
 typedef struct _gpu_attribute {
@@ -325,6 +326,14 @@ struct exynos_context {
 	int int_min_step;
 	int apollo_min_step;
 	int atlas_min_step;
+	int *mif_table;
+	int *int_table;
+	int *atlas_table;
+	int *apollo_table;
+	int mif_table_size;
+	int int_table_size;
+	int atlas_table_size;
+	int apollo_table_size;
 #endif
 	bool tmu_status;
 	int tmu_lock_clk[TMU_LOCK_CLK_END];
@@ -341,7 +350,7 @@ struct exynos_context {
 	bool power_status;
 
 	bool perf_gathering_status;
-#ifdef MALI_SEC_HWCNT
+#ifdef CONFIG_MALI_SEC_HWCNT
 	bool hwcnt_gathering_status;
 	bool hwcnt_gpr_status;
 	int hwcnt_polling_speed;
@@ -382,6 +391,9 @@ struct exynos_context {
 	gpu_dvfs_hwc_data hwc_data;
 #endif
 	gpu_attribute *attrib;
+	int mo_min_clock;
+	int *save_cpu_max_freq;
+	const struct kbase_pm_policy *cur_policy;
 };
 
 struct kbase_device *gpu_get_device_structure(void);
@@ -406,5 +418,8 @@ unsigned int gpu_get_config_attr_size(void);
 void gpu_dvfs_notify_poweron(void);
 void gpu_dvfs_notify_poweroff(void);
 void gpu_dvfs_check_destroy_context(struct kbase_context *kctx);
+#ifdef CONFIG_PWRCAL
+bool update_cal_table(void);
+#endif
 #endif
 #endif /* _GPU_PLATFORM_H_ */

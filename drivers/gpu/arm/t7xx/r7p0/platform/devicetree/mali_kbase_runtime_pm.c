@@ -45,6 +45,7 @@ int kbase_device_runtime_init(struct kbase_device *kbdev)
 {
 	dev_dbg(kbdev->dev, "kbase_device_runtime_init\n");
 	pm_runtime_enable(kbdev->dev);
+
 	return 0;
 }
 

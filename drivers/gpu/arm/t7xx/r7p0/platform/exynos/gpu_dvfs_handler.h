@@ -82,9 +82,10 @@ int gpu_pm_qos_command(struct exynos_context *platform, gpu_pmqos_state state);
 int gpu_mif_pmqos(struct exynos_context *platform, int mem_freq);
 #ifdef CONFIG_MALI_DVFS_USER
 int proactive_pm_qos_command(struct exynos_context *platform, gpu_pmqos_state state);
-int gpu_int_pmqos(struct exynos_context *platform, int int_step);
-int gpu_apollo_pmqos(struct exynos_context *platform, int apollo_step);
-int gpu_atlas_pmqos(struct exynos_context *platform, int atlas_step);
+int gpu_mif_min_pmqos(struct exynos_context *platform, int mem_step);
+int gpu_int_min_pmqos(struct exynos_context *platform, int int_step);
+int gpu_apollo_min_pmqos(struct exynos_context *platform, int apollo_step);
+int gpu_atlas_min_pmqos(struct exynos_context *platform, int atlas_step);
 int gpu_dvfs_update_hwc(struct kbase_device *kbdev);
 #endif
 #endif /* _GPU_DVFS_HANDLER_H_ */

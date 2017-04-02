@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2013-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2013-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -37,44 +37,6 @@
  * Attached value: number in micro seconds
  */
 #define DEFAULT_IRQ_THROTTLE_TIME_US 20
-
-/**
- *  Default Job Scheduler initial runtime of a context for the CFS Policy,
- *  in time-slices.
- *
- * This value is relative to that of the least-run context, and defines
- * where in the CFS queue a new context is added. A value of 1 means 'after
- * the least-run context has used its timeslice'. Therefore, when all
- * contexts consistently use the same amount of time, a value of 1 models a
- * FIFO. A value of 0 would model a LIFO.
- *
- * The value is represented in "numbers of time slices". Multiply this
- * value by that defined in @ref DEFAULT_JS_CTX_TIMESLICE_NS to get
- * the time value for this in nanoseconds.
- */
-#define DEFAULT_JS_CFS_CTX_RUNTIME_INIT_SLICES 1
-
-/**
- * Default Job Scheduler minimum runtime value of a context for CFS, in
- * time_slices relative to that of the least-run context.
- *
- * This is a measure of how much preferrential treatment is given to a
- * context that is not run very often.
- *
- * Specficially, this value defines how many timeslices such a context is
- * (initially) allowed to use at once. Such contexts (e.g. 'interactive'
- * processes) will appear near the front of the CFS queue, and can initially
- * use more time than contexts that run continuously (e.g. 'batch'
- * processes).
- *
- * This limit \b prevents a "stored-up timeslices" DoS attack, where a ctx
- * not run for a long time attacks the system by using a very large initial
- * number of timeslices when it finally does run.
- *
- * @note A value of zero allows not-run-often contexts to get scheduled in
- * quickly, but to only use a single timeslice when they get scheduled in.
- */
-#define DEFAULT_JS_CFS_CTX_RUNTIME_MIN_SLICES 2
 
 /**
 * Boolean indicating whether the driver is configured to be secure at
@@ -149,11 +111,6 @@ enum {
 #define DEFAULT_AWID_LIMIT KBASE_AID_32
 
 /**
- * Default setting for using alternative hardware counters.
- */
-#define DEFAULT_ALTERNATIVE_HWC false
-
-/**
  * Default UMP device mapping. A UMP_DEVICE_<device>_SHIFT value which
  * defines which UMP device this GPU should be mapped to.
  */
@@ -189,7 +146,7 @@ enum {
 /*
  * Default scheduling tick granuality
  */
-#define DEFAULT_JS_SCHEDULING_PERIOD_NS    (50000000u) /* 100ms -> 50ms */
+#define DEFAULT_JS_SCHEDULING_PERIOD_NS    (50000000u) /* 100ms => 50ms */
 
 /*
  * Default minimum number of scheduling ticks before jobs are soft-stopped.
@@ -197,48 +154,54 @@ enum {
  * This defines the time-slice for a job (which may be different from that of a
  * context)
  */
-#define DEFAULT_JS_SOFT_STOP_TICKS       (6) /* 100ms-200ms -> 300ms */
+#define DEFAULT_JS_SOFT_STOP_TICKS       (6) /* 100ms-200ms => 300ms */
 
 /*
  * Default minimum number of scheduling ticks before CL jobs are soft-stopped.
  */
-#define DEFAULT_JS_SOFT_STOP_TICKS_CL    (6) /* 100ms-200ms -> 300ms */
+#define DEFAULT_JS_SOFT_STOP_TICKS_CL    (6) /* 100ms-200ms => 300ms */
 
 /*
  * Default minimum number of scheduling ticks before jobs are hard-stopped
  */
-#define DEFAULT_JS_HARD_STOP_TICKS_SS    (7) /* 5s -> 350ms */
-#define DEFAULT_JS_HARD_STOP_TICKS_SS_8408  (300) /* 30s -> 15s */
+#define DEFAULT_JS_HARD_STOP_TICKS_SS    (7) /* 5s => 350ms */
+#define DEFAULT_JS_HARD_STOP_TICKS_SS_8408  (300) /* 30s => 15s*/
 
 /*
  * Default minimum number of scheduling ticks before CL jobs are hard-stopped.
  */
-#define DEFAULT_JS_HARD_STOP_TICKS_CL    (7) /* 5s -> 350ms */
+#define DEFAULT_JS_HARD_STOP_TICKS_CL    (7) /* 5s => 350ms */
 
 /*
  * Default minimum number of scheduling ticks before jobs are hard-stopped
  * during dumping
  */
-#define DEFAULT_JS_HARD_STOP_TICKS_DUMPING   (15000) /* 1500s -> 750s */
+#define DEFAULT_JS_HARD_STOP_TICKS_DUMPING   (15000) /* 1500s => 750s */
+
+/*
+ * Default timeout for some software jobs, after which the software event wait
+ * jobs will be cancelled.
+ */
+#define DEFAULT_JS_SOFT_JOB_TIMEOUT ((u32)3000) /* 3s */
 
 /*
  * Default minimum number of scheduling ticks before the GPU is reset to clear a
  * "stuck" job
  */
-#define DEFAULT_JS_RESET_TICKS_SS           (8) /* 5.5s -> 400ms */
-#define DEFAULT_JS_RESET_TICKS_SS_8408     (450) /* 45s -> 22.5s */
+#define DEFAULT_JS_RESET_TICKS_SS           (8) /* 5.5s => 400ms */
+#define DEFAULT_JS_RESET_TICKS_SS_8408     (450) /* 45s => 22.5s */
 
 /*
  * Default minimum number of scheduling ticks before the GPU is reset to clear a
  * "stuck" CL job.
  */
-#define DEFAULT_JS_RESET_TICKS_CL        (8) /* 5.5s -> 400ms */
+#define DEFAULT_JS_RESET_TICKS_CL        (8) /* 5.5s => 400ms */
 
 /*
  * Default minimum number of scheduling ticks before the GPU is reset to clear a
  * "stuck" job during dumping.
  */
-#define DEFAULT_JS_RESET_TICKS_DUMPING   (15020) /* 1502s -> 751s */
+#define DEFAULT_JS_RESET_TICKS_DUMPING   (15020) /* 1502s => 751s */
 
 /*
  * Default number of milliseconds given for other jobs on the GPU to be

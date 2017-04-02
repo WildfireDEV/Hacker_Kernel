@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2010-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2010-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -28,16 +28,15 @@
 #endif /* CONFIG_MALI_PLATFORM_DEVICETREE */
 
 #include <mali_kbase_pm.h>
-#include <backend/gpu/mali_kbase_jm_internal.h>
+#include <mali_kbase_hwaccess_jm.h>
+#include <backend/gpu/mali_kbase_js_internal.h>
 #include <backend/gpu/mali_kbase_pm_internal.h>
+
 
 void kbase_pm_register_access_enable(struct kbase_device *kbdev)
 {
 	struct kbase_pm_callback_conf *callbacks;
 
-#ifdef CONFIG_MALI_PLATFORM_DEVICETREE
-	pm_runtime_enable(kbdev->dev);
-#endif /* CONFIG_MALI_PLATFORM_DEVICETREE */
 	callbacks = (struct kbase_pm_callback_conf *)POWER_MANAGEMENT_CALLBACKS;
 
 	if (callbacks)
@@ -56,9 +55,6 @@ void kbase_pm_register_access_disable(struct kbase_device *kbdev)
 		callbacks->power_off_callback(kbdev);
 
 	kbdev->pm.backend.gpu_powered = false;
-#ifdef CONFIG_MALI_PLATFORM_DEVICETREE
-	pm_runtime_disable(kbdev->dev);
-#endif
 }
 
 int kbase_hwaccess_pm_init(struct kbase_device *kbdev)
@@ -69,6 +65,14 @@ int kbase_hwaccess_pm_init(struct kbase_device *kbdev)
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 
 	mutex_init(&kbdev->pm.lock);
+
+/* MALI_SEC_INTEGRATION */
+/*
+	kbdev->pm.backend.gpu_poweroff_wait_wq = alloc_workqueue("kbase_pm_poweroff_wait",
+			WQ_HIGHPRI | WQ_UNBOUND, 1);
+	if (!kbdev->pm.backend.gpu_poweroff_wait_wq)
+		return -ENOMEM;
+*/
 
 	kbdev->pm.backend.gpu_powered = false;
 	kbdev->pm.suspending = false;
@@ -98,6 +102,8 @@ int kbase_hwaccess_pm_init(struct kbase_device *kbdev)
 					callbacks->power_runtime_on_callback;
 		kbdev->pm.backend.callback_power_runtime_off =
 					callbacks->power_runtime_off_callback;
+		kbdev->pm.backend.callback_power_runtime_idle =
+					callbacks->power_runtime_idle_callback;
 /* MALI_SEC_INTEGRATION */
 		kbdev->pm.backend.callback_power_dvfs_on =
 					callbacks->power_dvfs_on_callback;
@@ -112,6 +118,7 @@ int kbase_hwaccess_pm_init(struct kbase_device *kbdev)
 		kbdev->pm.callback_power_runtime_term = NULL;
 		kbdev->pm.backend.callback_power_runtime_on = NULL;
 		kbdev->pm.backend.callback_power_runtime_off = NULL;
+		kbdev->pm.backend.callback_power_runtime_idle = NULL;
 /* MALI_SEC_INTEGRATION */
 		kbdev->pm.backend.callback_power_dvfs_on = NULL;
 		kbdev->pm.backend.callback_power_change_dvfs_level = NULL;
@@ -131,10 +138,13 @@ int kbase_hwaccess_pm_init(struct kbase_device *kbdev)
 	init_waitqueue_head(&kbdev->pm.zero_active_count_wait);
 	kbdev->pm.active_count = 0;
 
-	spin_lock_init(&kbdev->pm.power_change_lock);
 	spin_lock_init(&kbdev->pm.backend.gpu_cycle_counter_requests_lock);
 	spin_lock_init(&kbdev->pm.backend.gpu_powered_lock);
 
+/* MALI_SEC_INTEGRATION */
+/*
+	init_waitqueue_head(&kbdev->pm.backend.poweroff_wait);
+*/
 	if (kbase_pm_ca_init(kbdev) != 0)
 		goto workq_fail;
 
@@ -176,7 +186,7 @@ bool kbase_pm_do_poweroff(struct kbase_device *kbdev, bool is_suspend)
 
 	lockdep_assert_held(&kbdev->pm.lock);
 
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
+	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
 
 	/* Force all cores off */
 	kbdev->pm.backend.desired_shader_state = 0;
@@ -196,8 +206,7 @@ bool kbase_pm_do_poweroff(struct kbase_device *kbdev, bool is_suspend)
 				SW_FLOW_PM_CHECKTRANS_PM_DO_POWEROFF_END);
 	/* Don't need 'cores_are_available', because we don't return anything */
 	CSTD_UNUSED(cores_are_available);
-
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 
 	/* NOTE: We won't wait to reach the core's desired state, even if we're
 	 * powering off the GPU itself too. It's safe to cut the power whilst
@@ -210,6 +219,29 @@ bool kbase_pm_do_poweroff(struct kbase_device *kbdev, bool is_suspend)
 	/* Disable interrupts and turn the clock off */
 	return kbase_pm_clock_off(kbdev, is_suspend);
 }
+
+/* MALI_SEC_INTEGRATION */
+/*
+static bool is_poweroff_in_progress(struct kbase_device *kbdev)
+{
+	bool ret;
+	unsigned long flags;
+
+	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
+	ret = (kbdev->pm.backend.poweroff_wait_in_progress == false);
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+
+	return ret;
+}
+*/
+/* MALI_SEC_INTEGRATION */
+/*
+void kbase_pm_wait_for_poweroff_complete(struct kbase_device *kbdev)
+{
+	wait_event_killable(kbdev->pm.backend.poweroff_wait,
+			is_poweroff_in_progress(kbdev));
+}
+*/
 
 int kbase_hwaccess_pm_powerup(struct kbase_device *kbdev,
 		unsigned int flags)
@@ -242,7 +274,9 @@ int kbase_hwaccess_pm_powerup(struct kbase_device *kbdev,
 
 	kbasep_pm_read_present_cores(kbdev);
 
-	kbdev->pm.debug_core_mask =
+	kbdev->pm.debug_core_mask_all = kbdev->pm.debug_core_mask[0] =
+			kbdev->pm.debug_core_mask[1] =
+			kbdev->pm.debug_core_mask[2] =
 			kbdev->gpu_props.props.raw_props.shader_present;
 
 	/* Pretend the GPU is active to prevent a power policy turning the GPU
@@ -271,7 +305,7 @@ int kbase_hwaccess_pm_powerup(struct kbase_device *kbdev,
 	mutex_unlock(&kbdev->pm.lock);
 	mutex_unlock(&js_devdata->runpool_mutex);
 
-#ifdef MALI_SEC_HWCNT
+#ifdef CONFIG_MALI_SEC_HWCNT
 	if (kbdev->hwcnt.is_hwcnt_attach == false)
 		if (kbdev->vendor_callbacks->hwcnt_attach)
 			kbdev->vendor_callbacks->hwcnt_attach(kbdev);
@@ -315,6 +349,11 @@ void kbase_hwaccess_pm_term(struct kbase_device *kbdev)
 
 	/* Shut down the metrics subsystem */
 	kbasep_pm_metrics_term(kbdev);
+
+/* MALI_SEC_INTEGRATION */
+/*
+	destroy_workqueue(kbdev->pm.backend.gpu_poweroff_wait_wq);
+*/
 }
 
 void kbase_pm_power_changed(struct kbase_device *kbdev)
@@ -324,9 +363,9 @@ void kbase_pm_power_changed(struct kbase_device *kbdev)
 
 	KBASE_TIMELINE_PM_CHECKTRANS(kbdev,
 				SW_FLOW_PM_CHECKTRANS_GPU_INTERRUPT_START);
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
+	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
 	cores_are_available = kbase_pm_check_transitions_nolock(kbdev);
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 	KBASE_TIMELINE_PM_CHECKTRANS(kbdev,
 				SW_FLOW_PM_CHECKTRANS_GPU_INTERRUPT_END);
 
@@ -336,15 +375,21 @@ void kbase_pm_power_changed(struct kbase_device *kbdev)
 		kbase_timeline_pm_handle_event(kbdev,
 				KBASE_TIMELINE_PM_EVENT_GPU_STATE_CHANGED);
 
-		spin_lock_irqsave(&kbdev->js_data.runpool_irq.lock, flags);
-		kbase_gpu_slot_update(kbdev);
-		spin_unlock_irqrestore(&kbdev->js_data.runpool_irq.lock, flags);
+		spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
+		kbase_backend_slot_update(kbdev);
+		spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 	}
 }
 
-void kbase_pm_set_debug_core_mask(struct kbase_device *kbdev, u64 new_core_mask)
+void kbase_pm_set_debug_core_mask(struct kbase_device *kbdev,
+		u64 new_core_mask_js0, u64 new_core_mask_js1,
+		u64 new_core_mask_js2)
 {
-	kbdev->pm.debug_core_mask = new_core_mask;
+	kbdev->pm.debug_core_mask[0] = new_core_mask_js0;
+	kbdev->pm.debug_core_mask[1] = new_core_mask_js1;
+	kbdev->pm.debug_core_mask[2] = new_core_mask_js2;
+	kbdev->pm.debug_core_mask_all = new_core_mask_js0 | new_core_mask_js1 |
+			new_core_mask_js2;
 
 	kbase_pm_update_cores_state_nolock(kbdev);
 }
@@ -368,6 +413,7 @@ void kbase_hwaccess_pm_suspend(struct kbase_device *kbdev)
 	 * off prematurely) */
 	mutex_lock(&js_devdata->runpool_mutex);
 	mutex_lock(&kbdev->pm.lock);
+
 	kbase_pm_cancel_deferred_poweroff(kbdev);
 	if (!kbase_pm_do_poweroff(kbdev, true)) {
 		/* Page/bus faults are pending, must drop pm.lock to process.
@@ -379,8 +425,15 @@ void kbase_hwaccess_pm_suspend(struct kbase_device *kbdev)
 		WARN_ON(!kbase_pm_do_poweroff(kbdev, false));
 	}
 
+	kbase_backend_timer_suspend(kbdev);
+
 	mutex_unlock(&kbdev->pm.lock);
 	mutex_unlock(&js_devdata->runpool_mutex);
+
+/* MALI_SEC_INTEGRATION */
+/*
+	kbase_pm_wait_for_poweroff_complete(kbdev);
+*/
 }
 
 void kbase_hwaccess_pm_resume(struct kbase_device *kbdev)
@@ -389,10 +442,14 @@ void kbase_hwaccess_pm_resume(struct kbase_device *kbdev)
 
 	mutex_lock(&js_devdata->runpool_mutex);
 	mutex_lock(&kbdev->pm.lock);
+
 	kbdev->pm.suspending = false;
 	kbase_pm_do_poweron(kbdev, true);
 	/* MALI_SEC_INTEGRATION */
 	wake_up(&kbdev->pm.suspending_wait);
+
+	kbase_backend_timer_resume(kbdev);
+
 	mutex_unlock(&kbdev->pm.lock);
 	mutex_unlock(&js_devdata->runpool_mutex);
 }
