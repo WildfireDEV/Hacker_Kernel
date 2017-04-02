@@ -17,24 +17,9 @@
 
 #include <mali_kbase.h>
 
-#include <linux/of_device.h>
 #include <linux/pm_qos.h>
 #include <linux/cpufreq_kt.h>
-#include <linux/pm_domain.h>
-#include <linux/clk.h>
 #include <mach/pm_domains.h>
-#if defined(CONFIG_SOC_EXYNOS8890) && defined(CONFIG_PWRCAL)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0)
-#include <../pwrcal/pwrcal.h>
-#include <../pwrcal/S5E8890/S5E8890-vclk.h>
-#include <mach/pm_domains-cal.h>
-#else
-#include <../../../../../soc/samsung/pwrcal/pwrcal.h>
-#include <../../../../../soc/samsung/pwrcal/S5E8890/S5E8890-vclk.h>
-#include <../../../../../soc/samsung/pwrcal/S5E8890/S5E8890-vclk-internal.h>
-#include <soc/samsung/pm_domains-cal.h>
-#endif /* LINUX_VERSION */
-#endif /* CONFIG_SOC_EXYNOS8890 && CONFIG_PWRCAL */
 
 #include "mali_kbase_platform.h"
 #include "gpu_dvfs_handler.h"
@@ -70,7 +55,6 @@ static struct exynos_pm_domain *gpu_get_pm_domain(void)
 }
 #endif /* CONFIG_MALI_RT_PM */
 
-#ifdef CONFIG_SOC_EXYNOS7420
 int get_cpu_clock_speed(u32 *cpu_clock)
 {
 	struct clk *cpu_clk;
@@ -82,7 +66,6 @@ int get_cpu_clock_speed(u32 *cpu_clock)
 	*cpu_clock = (freq/MHZ);
 	return 0;
 }
-#endif
 
 int gpu_control_set_voltage(struct kbase_device *kbdev, int voltage)
 {
@@ -218,7 +201,7 @@ int gpu_control_disable_clock(struct kbase_device *kbdev)
 		ret = ctr_ops->disable_clock(platform);
 	mutex_unlock(&platform->gpu_clock_lock);
 
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef MALI_SEC_HWCNT
 	dvfs_hwcnt_clear_tripipe(kbdev);
 #endif
 	gpu_dvfs_update_time_in_state(platform->cur_clock);
@@ -265,16 +248,8 @@ int gpu_control_enable_customization(struct kbase_device *kbdev)
 	if (ctr_ops->set_clock_to_osc)
 		ctr_ops->set_clock_to_osc(platform);
 
-#ifdef CONFIG_MALI_SEC_HWCNT
-	mutex_lock(&kbdev->hwcnt.dvs_lock);
-#endif
-
 	platform->dvs_is_enabled = true;
 	ret = gpu_enable_dvs(platform);
-
-#ifdef CONFIG_MALI_SEC_HWCNT
-	mutex_unlock(&kbdev->hwcnt.dvs_lock);
-#endif
 
 	mutex_unlock(&platform->gpu_clock_lock);
 #endif /* CONFIG_REGULATOR */

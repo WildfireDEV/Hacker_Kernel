@@ -114,7 +114,7 @@ static gpu_attribute gpu_config_attributes[] = {
 	{GPU_EARLY_CLK_GATING, 0},
 	{GPU_DVS, 1},
 	{GPU_PERF_GATHERING, 0},
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef MALI_SEC_HWCNT
 	{GPU_HWCNT_PROFILE, 0},
 	{GPU_HWCNT_GATHERING, 1},
 	{GPU_HWCNT_POLLING_TIME, 90},
@@ -609,7 +609,6 @@ int gpu_disable_dvs(struct exynos_context *platform)
 
 int gpu_regulator_init(struct exynos_context *platform)
 {
-
 	g3d_regulator = regulator_get(NULL, "vdd_g3d");
 	if (IS_ERR(g3d_regulator)) {
 		GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u, "%s: failed to get vdd_g3d regulator, 0x%p\n", __func__, g3d_regulator);

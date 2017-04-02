@@ -1496,7 +1496,7 @@ static ssize_t show_fbdev(struct device *dev, struct device_attribute *attr, cha
 }
 #endif
 
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef MALI_SEC_HWCNT
 static ssize_t show_hwcnt_dvfs(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	ssize_t ret = 0;
@@ -1699,7 +1699,7 @@ static ssize_t show_hwcnt_tripipe(struct device *dev, struct device_attribute *a
 	if (!platform)
 		return -ENODEV;
 
-	ret += snprintf(buf+ret, PAGE_SIZE-ret, "%d : (active, arith, ls, tex) = (%llu, %llu, %llu, %llu)",
+	ret += snprintf(buf+ret, PAGE_SIZE-ret, "%d : (active, arith, ls, tex) = (%u, %u, %u, %u)",
 		platform->hwcnt_gathering_status, kbdev->hwcnt.resources_log.tripipe_active, kbdev->hwcnt.resources_log.arith_words, kbdev->hwcnt.resources_log.ls_issues, kbdev->hwcnt.resources_log.tex_issues);
 
 	if (ret < PAGE_SIZE - 1) {
@@ -1809,7 +1809,7 @@ DEVICE_ATTR(trace_dump, S_IRUGO|S_IWUSR, show_trace_dump, init_trace_dump);
 #ifdef DEBUG_FBDEV
 DEVICE_ATTR(fbdev, S_IRUGO, show_fbdev, NULL);
 #endif
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef MALI_SEC_HWCNT
 DEVICE_ATTR(hwcnt_dvfs, S_IRUGO|S_IWUSR, show_hwcnt_dvfs, set_hwcnt_dvfs);
 DEVICE_ATTR(hwcnt_gpr, S_IRUGO|S_IWUSR, show_hwcnt_gpr, set_hwcnt_gpr);
 DEVICE_ATTR(hwcnt_bt_state, S_IRUGO, show_hwcnt_bt_state, NULL);
@@ -1988,7 +1988,7 @@ int gpu_create_sysfs_file(struct device *dev)
 	}
 #endif
 
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef MALI_SEC_HWCNT
 	if (device_create_file(dev, &dev_attr_hwcnt_dvfs)) {
 		GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u,"Couldn't create sysfs file [hwcnt_dvfs]\n");
 		goto out;
@@ -2068,7 +2068,7 @@ void gpu_remove_sysfs_file(struct device *dev)
 #ifdef DEBUG_FBDEV
 	device_remove_file(dev, &dev_attr_fbdev);
 #endif
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef MALI_SEC_HWCNT
 	device_remove_file(dev, &dev_attr_hwcnt_dvfs);
 	device_remove_file(dev, &dev_attr_hwcnt_gpr);
 	device_remove_file(dev, &dev_attr_hwcnt_bt_state);

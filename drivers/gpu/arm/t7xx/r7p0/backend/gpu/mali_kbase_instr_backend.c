@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2014-2016 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2014-2015 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -23,7 +23,6 @@
 
 #include <mali_kbase.h>
 #include <mali_midg_regmap.h>
-#include <mali_kbase_hwaccess_instr.h>
 #include <backend/gpu/mali_kbase_device_internal.h>
 #include <backend/gpu/mali_kbase_pm_internal.h>
 #include <backend/gpu/mali_kbase_instr_internal.h>
@@ -41,15 +40,41 @@ static void kbasep_instr_hwcnt_cacheclean(struct kbase_device *kbdev)
 	u32 irq_mask;
 
 	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+	/* Wait for any reset to complete */
+	while (kbdev->hwcnt.backend.state == KBASE_INSTR_STATE_RESETTING) {
+		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
+#ifdef MALI_SEC_HWCNT
+		if (kbdev->hwcnt.is_hwcnt_attach) {
+			int ret = wait_event_timeout(kbdev->hwcnt.backend.cache_clean_wait,
+						kbdev->hwcnt.backend.state !=
+							KBASE_INSTR_STATE_RESETTING, kbdev->hwcnt.timeout);
+			if (ret == 0)
+				kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_IDLE;
+		}
+		else
+#endif
+		wait_event(kbdev->hwcnt.backend.cache_clean_wait,
+				kbdev->hwcnt.backend.state !=
+						KBASE_INSTR_STATE_RESETTING);
+		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+	}
 	KBASE_DEBUG_ASSERT(kbdev->hwcnt.backend.state ==
 					KBASE_INSTR_STATE_REQUEST_CLEAN);
 
+#ifdef MALI_SEC_HWCNT
+	/* consider hwcnt state before register access */
+	if (kbdev->hwcnt.backend.state != KBASE_INSTR_STATE_REQUEST_CLEAN) {
+		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
+		return;
+	}
+#endif
+
 	/* Enable interrupt */
-	spin_lock_irqsave(&kbdev->hwaccess_lock, pm_flags);
+	spin_lock_irqsave(&kbdev->pm.power_change_lock, pm_flags);
 	irq_mask = kbase_reg_read(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK), NULL);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK),
 				irq_mask | CLEAN_CACHES_COMPLETED, NULL);
-	spin_unlock_irqrestore(&kbdev->hwaccess_lock, pm_flags);
+	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, pm_flags);
 
 	/* clean&invalidate the caches so we're sure the mmu tables for the dump
 	 * buffer is valid */
@@ -67,13 +92,17 @@ int kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev,
 {
 	unsigned long flags, pm_flags;
 	int err = -EINVAL;
+	struct kbasep_js_device_data *js_devdata;
 	u32 irq_mask;
 	int ret;
 	u64 shader_cores_needed;
-	u32 prfcnt_config;
+
+	KBASE_DEBUG_ASSERT(NULL == kbdev->hwcnt.suspended_kctx);
 
 	shader_cores_needed = kbase_pm_get_present_cores(kbdev,
 							KBASE_PM_CORE_SHADER);
+
+	js_devdata = &kbdev->js_data;
 
 	/* alignment failure */
 	if ((setup->dump_buffer == 0ULL) || (setup->dump_buffer & (2048 - 1)))
@@ -85,11 +114,31 @@ int kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev,
 
 	/* Request the cores early on synchronously - we'll release them on any
 	 * errors (e.g. instrumentation already active) */
-#ifndef CONFIG_MALI_SEC_HWCNT
+#ifndef MALI_SEC_HWCNT
 	kbase_pm_request_cores_sync(kbdev, true, shader_cores_needed);
 #endif
 
 	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+
+	if (kbdev->hwcnt.backend.state == KBASE_INSTR_STATE_RESETTING) {
+		/* GPU is being reset */
+		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
+#ifdef MALI_SEC_HWCNT
+		{
+			int ret = wait_event_timeout(kbdev->hwcnt.backend.wait, kbdev->hwcnt.backend.triggered != 0, kbdev->hwcnt.timeout);
+			if (ret == 0) {
+				kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_IDLE;
+				err = -EINVAL;
+				GPU_LOG(DVFS_WARNING, DUMMY, 0u, 0u, "skip enable hwcnt %d \n", __LINE__);
+				return err;
+			}
+		}
+#else
+		wait_event(kbdev->hwcnt.backend.wait,
+					kbdev->hwcnt.backend.triggered != 0);
+#endif
+		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+	}
 
 	if (kbdev->hwcnt.backend.state != KBASE_INSTR_STATE_DISABLED) {
 		/* Instrumentation is already enabled */
@@ -98,16 +147,20 @@ int kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev,
 	}
 
 	/* Enable interrupt */
-	spin_lock_irqsave(&kbdev->hwaccess_lock, pm_flags);
+	spin_lock_irqsave(&kbdev->pm.power_change_lock, pm_flags);
 	irq_mask = kbase_reg_read(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK), NULL);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK), irq_mask |
 						PRFCNT_SAMPLE_COMPLETED, NULL);
-	spin_unlock_irqrestore(&kbdev->hwaccess_lock, pm_flags);
+	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, pm_flags);
 
 	/* In use, this context is the owner */
 	kbdev->hwcnt.kctx = kctx;
 	/* Remember the dump address so we can reprogram it later */
 	kbdev->hwcnt.addr = setup->dump_buffer;
+	/* Remember all the settings for suspend/resume */
+	if (&kbdev->hwcnt.suspended_state != setup)
+		memcpy(&kbdev->hwcnt.suspended_state, setup,
+					sizeof(kbdev->hwcnt.suspended_state));
 
 	/* Request the clean */
 	kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_REQUEST_CLEAN;
@@ -120,13 +173,13 @@ int kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev,
 
 	spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef MALI_SEC_HWCNT
 	{
 		int ret = wait_event_timeout(kbdev->hwcnt.backend.wait, kbdev->hwcnt.backend.triggered != 0, kbdev->hwcnt.timeout);
 		if (ret == 0) {
-			kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_DISABLED;
+			kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_IDLE;
 			err = -EINVAL;
-			GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u, "wait_event_timeout error in %s %d \n", __FUNCTION__, err);
+			GPU_LOG(DVFS_WARNING, DUMMY, 0u, 0u, "skip enable hwcnt %d \n", __LINE__);
 			return err;
 		}
 	}
@@ -142,22 +195,9 @@ int kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev,
 	kbase_pm_request_l2_caches(kbdev);
 
 	/* Configure */
-	prfcnt_config = kctx->as_nr << PRFCNT_CONFIG_AS_SHIFT;
-#ifdef CONFIG_MALI_PRFCNT_SET_SECONDARY
-	{
-		u32 gpu_id = kbdev->gpu_props.props.raw_props.gpu_id;
-		u32 product_id = (gpu_id & GPU_ID_VERSION_PRODUCT_ID)
-			>> GPU_ID_VERSION_PRODUCT_ID_SHIFT;
-		int arch_v6 = GPU_ID_IS_NEW_FORMAT(product_id);
-
-		if (arch_v6)
-			prfcnt_config |= 1 << PRFCNT_CONFIG_SETSELECT_SHIFT;
-	}
-#endif
-
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(PRFCNT_CONFIG),
-			prfcnt_config | PRFCNT_CONFIG_MODE_OFF, kctx);
-
+					(kctx->as_nr << PRFCNT_CONFIG_AS_SHIFT)
+					| PRFCNT_CONFIG_MODE_OFF, kctx);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(PRFCNT_BASE_LO),
 					setup->dump_buffer & 0xFFFFFFFF, kctx);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(PRFCNT_BASE_HI),
@@ -178,7 +218,8 @@ int kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev,
 							setup->tiler_bm, kctx);
 
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(PRFCNT_CONFIG),
-			prfcnt_config | PRFCNT_CONFIG_MODE_MANUAL, kctx);
+				(kctx->as_nr << PRFCNT_CONFIG_AS_SHIFT) |
+				PRFCNT_CONFIG_MODE_MANUAL, kctx);
 
 	/* If HW has PRLAM-8186 we can now re-enable the tiler HW counters dump
 	 */
@@ -187,6 +228,26 @@ int kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev,
 							setup->tiler_bm, kctx);
 
 	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+
+	if (kbdev->hwcnt.backend.state == KBASE_INSTR_STATE_RESETTING) {
+		/* GPU is being reset */
+		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
+#ifdef MALI_SEC_HWCNT
+		{
+			int ret = wait_event_timeout(kbdev->hwcnt.backend.wait, kbdev->hwcnt.backend.triggered != 0, kbdev->hwcnt.timeout);
+			if (ret == 0) {
+				kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_IDLE;
+				err = -EINVAL;
+				GPU_LOG(DVFS_WARNING, DUMMY, 0u, 0u, "skip enable hwcnt %d \n", __LINE__);
+				return err;
+			}
+		}
+#else
+		wait_event(kbdev->hwcnt.backend.wait,
+					kbdev->hwcnt.backend.triggered != 0);
+#endif
+		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+	}
 
 	kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_IDLE;
 	kbdev->hwcnt.backend.triggered = 1;
@@ -199,9 +260,7 @@ int kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev,
 	dev_dbg(kbdev->dev, "HW counters dumping set-up for context %p", kctx);
 	return err;
  out_unrequest_cores:
-	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
 	kbase_pm_unrequest_cores(kbdev, true, shader_cores_needed);
-	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
  out_err:
 	return err;
 }
@@ -234,7 +293,7 @@ int kbase_instr_hwcnt_disable_internal(struct kbase_context *kctx)
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 
 		/* Ongoing dump/setup - wait for its completion */
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef MALI_SEC_HWCNT
 		if (kbdev->hwcnt.is_hwcnt_attach) {
 			int ret = wait_event_timeout(kbdev->hwcnt.backend.wait,
 							kbdev->hwcnt.backend.triggered != 0, kbdev->hwcnt.timeout);
@@ -251,10 +310,11 @@ int kbase_instr_hwcnt_disable_internal(struct kbase_context *kctx)
 	kbdev->hwcnt.backend.triggered = 0;
 
 	/* Disable interrupt */
-	spin_lock_irqsave(&kbdev->hwaccess_lock, pm_flags);
+	spin_lock_irqsave(&kbdev->pm.power_change_lock, pm_flags);
 	irq_mask = kbase_reg_read(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK), NULL);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK),
 				irq_mask & ~PRFCNT_SAMPLE_COMPLETED, NULL);
+	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, pm_flags);
 
 	/* Disable the counters */
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(PRFCNT_CONFIG), 0, kctx);
@@ -264,15 +324,14 @@ int kbase_instr_hwcnt_disable_internal(struct kbase_context *kctx)
 
 	kbase_pm_ca_instr_disable(kbdev);
 
-#ifndef CONFIG_MALI_SEC_HWCNT
+#ifndef MALI_SEC_HWCNT
 	kbase_pm_unrequest_cores(kbdev, true,
 		kbase_pm_get_present_cores(kbdev, KBASE_PM_CORE_SHADER));
 #endif
 
-	kbase_pm_release_l2_caches(kbdev);
-
-	spin_unlock_irqrestore(&kbdev->hwaccess_lock, pm_flags);
 	spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
+
+	kbase_pm_release_l2_caches(kbdev);
 
 	dev_dbg(kbdev->dev, "HW counters dumping disabled for context %p",
 									kctx);
@@ -358,49 +417,36 @@ void kbasep_cache_clean_worker(struct work_struct *data)
 {
 	struct kbase_device *kbdev;
 	unsigned long flags;
-#ifdef CONFIG_MALI_SEC_HWCNT
-	struct exynos_context *platform;
-#endif
 
 	kbdev = container_of(data, struct kbase_device,
 						hwcnt.backend.cache_clean_work);
-
-#ifdef CONFIG_MALI_SEC_HWCNT
-	platform = (struct exynos_context *) kbdev->platform_context;
-	mutex_lock(&kbdev->hwcnt.dvs_lock);
-
-	if (platform->dvs_is_enabled == true)
-	{
-		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
-		kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_IDLE;
-		kbdev->hwcnt.backend.triggered = 1;
-		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-		mutex_unlock(&kbdev->hwcnt.dvs_lock);
-		GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u, "dvs is enabled before running cache clean worker error in %s\n", __FUNCTION__);
-		return;
-	}
-#endif
 
 	mutex_lock(&kbdev->cacheclean_lock);
 	kbasep_instr_hwcnt_cacheclean(kbdev);
 
 	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 	/* Wait for our condition, and any reset to complete */
-	while (kbdev->hwcnt.backend.state == KBASE_INSTR_STATE_CLEANING) {
+	while (kbdev->hwcnt.backend.state == KBASE_INSTR_STATE_RESETTING ||
+			kbdev->hwcnt.backend.state ==
+						KBASE_INSTR_STATE_CLEANING) {
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef	MALI_SEC_HWCNT
 		if (kbdev->hwcnt.is_hwcnt_attach) {
 			int ret = wait_event_timeout(kbdev->hwcnt.backend.cache_clean_wait,
+						(kbdev->hwcnt.backend.state !=
+								KBASE_INSTR_STATE_RESETTING &&
 						 kbdev->hwcnt.backend.state !=
-								KBASE_INSTR_STATE_CLEANING, kbdev->hwcnt.timeout);
+								KBASE_INSTR_STATE_CLEANING), kbdev->hwcnt.timeout);
 			if (ret == 0)
 				kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_IDLE;
 		}
 		else
 #endif
 		wait_event(kbdev->hwcnt.backend.cache_clean_wait,
+				(kbdev->hwcnt.backend.state !=
+						KBASE_INSTR_STATE_RESETTING &&
 				kbdev->hwcnt.backend.state !=
-						KBASE_INSTR_STATE_CLEANING);
+						KBASE_INSTR_STATE_CLEANING));
 		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 	}
 	KBASE_DEBUG_ASSERT(kbdev->hwcnt.backend.state ==
@@ -413,9 +459,6 @@ void kbasep_cache_clean_worker(struct work_struct *data)
 
 	spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 	mutex_unlock(&kbdev->cacheclean_lock);
-#ifdef CONFIG_MALI_SEC_HWCNT
-	mutex_unlock(&kbdev->hwcnt.dvs_lock);
-#endif
 }
 
 void kbase_instr_hwcnt_sample_done(struct kbase_device *kbdev)
@@ -436,6 +479,9 @@ void kbase_instr_hwcnt_sample_done(struct kbase_device *kbdev)
 					&kbdev->hwcnt.backend.cache_clean_work);
 		KBASE_DEBUG_ASSERT(ret);
 	}
+	/* NOTE: In the state KBASE_INSTR_STATE_RESETTING, We're in a reset,
+	 * and the instrumentation state hasn't been restored yet -
+	 * kbasep_reset_timeout_worker() will do the rest of the work */
 
 	spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 }
@@ -450,12 +496,12 @@ void kbase_clean_caches_done(struct kbase_device *kbdev)
 
 		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 		/* Disable interrupt */
-		spin_lock_irqsave(&kbdev->hwaccess_lock, pm_flags);
+		spin_lock_irqsave(&kbdev->pm.power_change_lock, pm_flags);
 		irq_mask = kbase_reg_read(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK),
 									NULL);
 		kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK),
 				irq_mask & ~CLEAN_CACHES_COMPLETED, NULL);
-		spin_unlock_irqrestore(&kbdev->hwaccess_lock, pm_flags);
+		spin_unlock_irqrestore(&kbdev->pm.power_change_lock, pm_flags);
 
 		/* Wakeup... */
 		if (kbdev->hwcnt.backend.state == KBASE_INSTR_STATE_CLEANING) {
@@ -463,6 +509,10 @@ void kbase_clean_caches_done(struct kbase_device *kbdev)
 			kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_CLEANED;
 			wake_up(&kbdev->hwcnt.backend.cache_clean_wait);
 		}
+		/* NOTE: In the state KBASE_INSTR_STATE_RESETTING, We're in a
+		 * reset, and the instrumentation state hasn't been restored yet
+		 * - kbasep_reset_timeout_worker() will do the rest of the work
+		 */
 
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 	}
@@ -475,13 +525,13 @@ int kbase_instr_hwcnt_wait_for_dump(struct kbase_context *kctx)
 	int err;
 
 	/* Wait for dump & cacheclean to complete */
-#ifdef CONFIG_MALI_SEC_HWCNT
+#ifdef MALI_SEC_HWCNT
 	if (kbdev->hwcnt.is_hwcnt_attach) {
 		int ret = wait_event_timeout(kbdev->hwcnt.backend.wait, kbdev->hwcnt.backend.triggered != 0, kbdev->hwcnt.timeout);
 		if (ret == 0) {
 			kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_IDLE;
 			err = -EINVAL;
-			GPU_LOG(DVFS_ERROR, DUMMY, 0u, 0u, "wait_event_timeout error in %s %d \n", __FUNCTION__, err);
+			GPU_LOG(DVFS_WARNING, DUMMY, 0u, 0u, "skip dump hwcnt %d \n", __LINE__);
 			return err;
 		}
 	} else
@@ -490,6 +540,19 @@ int kbase_instr_hwcnt_wait_for_dump(struct kbase_context *kctx)
 					kbdev->hwcnt.backend.triggered != 0);
 
 	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+
+	if (kbdev->hwcnt.backend.state == KBASE_INSTR_STATE_RESETTING) {
+		/* GPU is being reset */
+		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
+#ifdef MALI_SEC_HWCNT
+		if (kbdev->hwcnt.is_hwcnt_attach)
+			wait_event_timeout(kbdev->hwcnt.backend.wait, kbdev->hwcnt.backend.triggered != 0, kbdev->hwcnt.timeout);
+		else
+#endif
+		wait_event(kbdev->hwcnt.backend.wait,
+					kbdev->hwcnt.backend.triggered != 0);
+		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+	}
 
 	if (kbdev->hwcnt.backend.state == KBASE_INSTR_STATE_FAULT) {
 		err = -EINVAL;
@@ -513,6 +576,20 @@ int kbase_instr_hwcnt_clear(struct kbase_context *kctx)
 	struct kbase_device *kbdev = kctx->kbdev;
 
 	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+
+	if (kbdev->hwcnt.backend.state == KBASE_INSTR_STATE_RESETTING) {
+		/* GPU is being reset */
+		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
+#ifdef MALI_SEC_HWCNT
+		if (kbdev->hwcnt.is_hwcnt_attach)
+			wait_event_timeout(kbdev->hwcnt.backend.wait,
+						kbdev->hwcnt.backend.triggered != 0, kbdev->hwcnt.timeout);
+		else
+#endif
+		wait_event(kbdev->hwcnt.backend.wait,
+					kbdev->hwcnt.backend.triggered != 0);
+		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+	}
 
 	/* Check it's the context previously set up and we're not already
 	 * dumping */
@@ -546,9 +623,7 @@ int kbase_instr_backend_init(struct kbase_device *kbdev)
 	kbdev->hwcnt.backend.triggered = 0;
 
 	kbdev->hwcnt.backend.cache_clean_wq =
-		/* MALI_SEC_INTEGRATION */
-		/* alloc_workqueue option is changed to ordered */
-			alloc_workqueue("Mali cache cleaning workqueue", WQ_UNBOUND | __WQ_ORDERED | 0, 1);
+			alloc_workqueue("Mali cache cleaning workqueue", 0, 1);
 	if (NULL == kbdev->hwcnt.backend.cache_clean_wq)
 		ret = -EINVAL;
 
