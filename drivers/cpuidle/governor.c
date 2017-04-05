@@ -98,6 +98,29 @@ int cpuidle_register_governor(struct cpuidle_governor *gov)
 }
 
 /**
+* cpuidle_replace_governor - find a replacement governor
+* @exclude_rating: the rating that will be skipped while looking for
+* new governor.
+*/
+static struct cpuidle_governor *cpuidle_replace_governor(int exclude_rating)
+{
+       struct cpuidle_governor *gov;
+       struct cpuidle_governor *ret_gov = NULL;
+       unsigned int max_rating = 0;
+
+       list_for_each_entry(gov, &cpuidle_governors, governor_list) {
+               if (gov->rating == exclude_rating)
+                       continue;
+               if (gov->rating > max_rating) {
+                       max_rating = gov->rating;
+                       ret_gov = gov;
+               }
+       }
+
+       return ret_gov;
+}
+
+/**
 * cpuidle_unregister_governor - unregisters a governor
 * @gov: the governor
 */
