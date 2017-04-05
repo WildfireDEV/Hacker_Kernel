@@ -96,3 +96,22 @@ int cpuidle_register_governor(struct cpuidle_governor *gov)
 
 	return ret;
 }
+
+/**
+* cpuidle_unregister_governor - unregisters a governor
+* @gov: the governor
+*/
+void cpuidle_unregister_governor(struct cpuidle_governor *gov)
+{
+        if (!gov)
+                return;
+
+        mutex_lock(&cpuidle_lock);
+        if (gov == cpuidle_curr_governor) {
+                struct cpuidle_governor *new_gov;
+                new_gov = cpuidle_replace_governor(gov->rating);
+                cpuidle_switch_governor(new_gov);
+        }
+        list_del(&gov->governor_list);
+        mutex_unlock(&cpuidle_lock);
+}
