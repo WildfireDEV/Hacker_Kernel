@@ -11,7 +11,7 @@ hacker-echoe-kernel
 #Toolchain
 UBERTC-aarch64-linux-android-5.3/bin/aarch64-linux-android-
 #Su Version
--su_266
+-su_279
 #Device
 -S6-Userbuild
 -g920f
