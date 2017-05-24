@@ -276,32 +276,6 @@ PATCH_RAMDISK()
 	insert_line $RAMDISK/default.prop "# HRT KERNEL" after "sys.config.spcm_db_launcher=false" "sys.config.spcm_preload_enable=false\n";
 	insert_line $RAMDISK/default.prop "# HRT KERNEL" after "debug.atrace.tags.enableflags=0" "# HRT KERNEL\n";
 
-	# su
-	if [ "`grep "    # HRT-KERNEL-SU" $RAMDISK/init.rc`" != "" ]; then
-		echo ""
-	else
-		SUPATCH=`cat $PATCH/su_patch`
-		SUSCRIPT=`cat $PATCH/launch_daemonsu.sh`
-		echo "$SUPATCH" >> $RAMDISK/init.rc
-		echo "$SUSCRIPT" > $RAMDISK/sbin/launch_daemonsu.sh
-	fi
-	if [ "`grep "# HRT-KERNEL-SU" $RAMDISK/fstab.samsungexynos7420.fwup`" != "" ]; then
-		echo ""
-	else
-		fstabsamsungexynos7420fwuppatch=`cat $PATCH/fstab.samsungexynos7420.fwup_patch`
-		echo "$fstabsamsungexynos7420fwuppatch" > $RAMDISK/fstab.samsungexynos7420.fwup
-	fi
-	if [ "`grep "# HRT-KERNEL-SU" $RAMDISK/fstab.samsungexynos7420`" != "" ]; then
-		echo ""
-	else
-		fstabsamsungexynos7420patch=`cat $PATCH/fstab.samsungexynos7420_patch`
-		echo "$fstabsamsungexynos7420patch" > $RAMDISK/fstab.samsungexynos7420
-	fi
-	insert_line $RAMDISK/init.environ.rc "    # HRT-KERNEL-SU" before "export ANDROID_BOOTLOGO 1" "    export PATH /su/bin:/sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin\n";
-	insert_line $RAMDISK/init.environ.rc "    # HRT-KERNEL-SU" before "export ANDROID_BOOTLOGO 1" "    # HRT-KERNEL-SU\n";
-	insert_line $RAMDISK/init.rc "    # HRT-KERNEL-SU" before "mkdir /data 0771 system system" "    mkdir /su 0755 root root # create mount point for SuperSU\n";
-	insert_line $RAMDISK/init.rc "    # HRT-KERNEL-SU" before "mkdir /data 0771 system system" "    # HRT-KERNEL-SU\n";
-
 	# init.rc
 	if [ "`grep "# Include hacker extra init file" $RAMDISK/init.rc`" != "" ]; then
 		echo ""
